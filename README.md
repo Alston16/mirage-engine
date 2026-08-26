@@ -121,7 +121,7 @@ load. That's expected behavior for this class of solver, not a bug to chase.
 
 ## MVP milestones
 
-- [ ] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/
+- [x] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/
       `Rot2` and unit tests.
       *Done when:* `cargo test` passes with dot/cross/rotation coverage.
 - [ ] **M1 — Bodies, gravity, integrator.** `RigidBody`, `World::step`,

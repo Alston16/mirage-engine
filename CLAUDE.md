@@ -55,6 +55,11 @@ applies the resulting velocities to position (semi-implicit Euler).
 The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 `mirage` itself only ever produces geometry and body state.
 
+## Git workflow
+
+- Never push directly to `main`. All changes go through a feature branch and
+  a pull request, even for small or scaffold-only commits.
+
 ## Working on this repo
 
 - Follow milestone order (M0 → M4 in `README.md`) — later milestones assume
