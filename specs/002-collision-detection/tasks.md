@@ -28,8 +28,8 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 **Purpose**: Create the empty module scaffolding this milestone needs, with no behavior yet.
 
-- [ ] T001 [P] Create stub files `src/shape.rs`, `src/broadphase.rs`, `src/collision/mod.rs`, `src/collision/circle.rs`, `src/collision/polygon.rs`, `src/collision/manifold.rs` (empty, per README's module tree and `plan.md` Project Structure).
-- [ ] T002 Wire `pub mod shape;`, `pub mod broadphase;`, `pub mod collision;` declarations into `src/lib.rs`, following the existing `pub mod body; pub mod math; pub mod world;` pattern. Depends on T001 (files must exist to be declared).
+- [X] T001 [P] Create stub files `src/shape.rs`, `src/broadphase.rs`, `src/collision/mod.rs`, `src/collision/circle.rs`, `src/collision/polygon.rs`, `src/collision/manifold.rs` (empty, per README's module tree and `plan.md` Project Structure).
+- [X] T002 Wire `pub mod shape;`, `pub mod broadphase;`, `pub mod collision;` declarations into `src/lib.rs`, following the existing `pub mod body; pub mod math; pub mod world;` pattern. Depends on T001 (files must exist to be declared).
 
 **Checkpoint**: Crate compiles with empty modules.
 
@@ -41,14 +41,14 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 Implement `Aabb { min: Vec2, max: Vec2 }` with `overlaps(&self, other: &Aabb) -> bool` (interval overlap on both axes), in `src/shape.rs`. Per `data-model.md`/`contracts/engine-api.md`.
-- [ ] T004 Implement `Shape` (`Circle { radius: f32 }`, `Polygon { vertices: Vec<Vec2>, normals: Vec<Vec2> }`) with `Shape::circle(radius) -> Self`, `Shape::polygon(vertices: Vec<Vec2>) -> Self` (derives outward CCW edge normals from consecutive vertex pairs), and `Shape::aabb(&self, position: Vec2, orientation: Rot2) -> Aabb` (circle: `position ± radius` box; polygon: transform every vertex by `orientation`/`position`, take min/max extent), in `src/shape.rs`. Depends on T003.
-- [ ] T005 Add `pub shape: Shape` field to `RigidBody`; change `new_dynamic(position: Vec2, mass: f32, shape: Shape) -> Self` and `new_static(position: Vec2, shape: Shape) -> Self` accordingly, in `src/body.rs`. Depends on T004. **Breaking change from M1** — see T006.
-- [ ] T006 Update `examples/bouncing.rs` call sites to pass `Shape::circle(radius)` (using each circle's existing local radius) to `RigidBody::new_dynamic`/`new_static`, restoring compilation after T005's signature change. Depends on T005.
-- [ ] T007 [P] Implement `broadphase::candidate_pairs(bodies: &[RigidBody]) -> Vec<(usize, usize)>` — O(n²) loop over all index pairs `i < j`, accepting a pair only when `bodies[i].shape.aabb(bodies[i].position, bodies[i].orientation)` overlaps the same for `j`, in `src/broadphase.rs`. Depends on T004, T005.
-- [ ] T008 [P] Implement `Contact { point: Vec2, normal: Vec2, penetration: f32 }` and `Manifold { body_a: BodyId, body_b: BodyId, points: Vec<Contact> }` in `src/collision/manifold.rs`. Depends on T003 (different file from T007 — can run in parallel with it).
-- [ ] T009 Add stub narrowphase functions returning `None` — `pub(crate) fn circle_vs_circle(a: &RigidBody, b: &RigidBody) -> Option<Contact>` and `circle_vs_polygon(circle: &RigidBody, polygon: &RigidBody) -> Option<Contact>` in `src/collision/circle.rs`; `pub(crate) fn polygon_vs_polygon(a: &RigidBody, b: &RigidBody) -> Option<Vec<Contact>>` in `src/collision/polygon.rs` — plus `collision::detect_contacts(bodies: &[RigidBody]) -> Vec<Manifold>` in `src/collision/mod.rs` that runs `broadphase::candidate_pairs`, dispatches each pair to the matching stub by `Shape` variant, and collects any `Some` result into a `Manifold`. Depends on T007, T008.
-- [ ] T010 Add `contacts: Vec<Manifold>` field to `World`; in `World::step`, after each fixed substep's integration, replace `contacts` with the result of `collision::detect_contacts(&self.bodies)`; add `World::contacts(&self) -> &[Manifold]` accessor, in `src/world.rs`. Depends on T009.
+- [X] T003 Implement `Aabb { min: Vec2, max: Vec2 }` with `overlaps(&self, other: &Aabb) -> bool` (interval overlap on both axes), in `src/shape.rs`. Per `data-model.md`/`contracts/engine-api.md`.
+- [X] T004 Implement `Shape` (`Circle { radius: f32 }`, `Polygon { vertices: Vec<Vec2>, normals: Vec<Vec2> }`) with `Shape::circle(radius) -> Self`, `Shape::polygon(vertices: Vec<Vec2>) -> Self` (derives outward CCW edge normals from consecutive vertex pairs), and `Shape::aabb(&self, position: Vec2, orientation: Rot2) -> Aabb` (circle: `position ± radius` box; polygon: transform every vertex by `orientation`/`position`, take min/max extent), in `src/shape.rs`. Depends on T003.
+- [X] T005 Add `pub shape: Shape` field to `RigidBody`; change `new_dynamic(position: Vec2, mass: f32, shape: Shape) -> Self` and `new_static(position: Vec2, shape: Shape) -> Self` accordingly, in `src/body.rs`. Depends on T004. **Breaking change from M1** — see T006.
+- [X] T006 Update `examples/bouncing.rs` call sites to pass `Shape::circle(radius)` (using each circle's existing local radius) to `RigidBody::new_dynamic`/`new_static`, restoring compilation after T005's signature change. Depends on T005.
+- [X] T007 [P] Implement `broadphase::candidate_pairs(bodies: &[RigidBody]) -> Vec<(usize, usize)>` — O(n²) loop over all index pairs `i < j`, accepting a pair only when `bodies[i].shape.aabb(bodies[i].position, bodies[i].orientation)` overlaps the same for `j`, in `src/broadphase.rs`. Depends on T004, T005.
+- [X] T008 [P] Implement `Contact { point: Vec2, normal: Vec2, penetration: f32 }` and `Manifold { body_a: BodyId, body_b: BodyId, points: Vec<Contact> }` in `src/collision/manifold.rs`. Depends on T003 (different file from T007 — can run in parallel with it).
+- [X] T009 Add stub narrowphase functions returning `None` — `pub(crate) fn circle_vs_circle(a: &RigidBody, b: &RigidBody) -> Option<Contact>` and `circle_vs_polygon(circle: &RigidBody, polygon: &RigidBody) -> Option<Contact>` in `src/collision/circle.rs`; `pub(crate) fn polygon_vs_polygon(a: &RigidBody, b: &RigidBody) -> Option<Vec<Contact>>` in `src/collision/polygon.rs` — plus `collision::detect_contacts(bodies: &[RigidBody]) -> Vec<Manifold>` in `src/collision/mod.rs` that runs `broadphase::candidate_pairs`, dispatches each pair to the matching stub by `Shape` variant, and collects any `Some` result into a `Manifold`. Depends on T007, T008.
+- [X] T010 Add `contacts: Vec<Manifold>` field to `World`; in `World::step`, after each fixed substep's integration, replace `contacts` with the result of `collision::detect_contacts(&self.bodies)`; add `World::contacts(&self) -> &[Manifold]` accessor, in `src/world.rs`. Depends on T009.
 
 **Checkpoint**: `cargo build` succeeds; the full broadphase→narrowphase→`World.contacts()` pipeline runs every step but reports no contacts yet (narrowphase is stubbed). Foundation ready for story-specific narrowphase implementations.
 
@@ -62,15 +62,15 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 ### Tests for User Story 1
 
-- [ ] T011 [P] [US1] Add test in `src/collision/circle.rs` `#[cfg(test)] mod tests`: two circles whose centers are closer together than the sum of their radii produce `Some(Contact)` with normal pointing from body A's center toward body B's center and `penetration == r_a + r_b - dist` (within 1e-4) (spec Acceptance Scenario 1, SC-001).
-- [ ] T012 [P] [US1] Add test in `src/collision/circle.rs` tests: two circles farther apart than the sum of their radii produce `None` (spec Acceptance Scenario 2).
-- [ ] T013 [P] [US1] Add test in `src/broadphase.rs` tests: given bodies scattered so only a few pairs' AABBs overlap, `candidate_pairs` returns exactly those overlapping pairs and no others (spec Acceptance Scenario 3, SC-003).
-- [ ] T014 [P] [US1] Add test in `src/collision/circle.rs` tests: two circles exactly touching (`dist == r_a + r_b`) do not flicker into a false contact from float noise — confirm the epsilon/slop guard from `research.md` (spec Edge Cases).
+- [X] T011 [P] [US1] Add test in `src/collision/circle.rs` `#[cfg(test)] mod tests`: two circles whose centers are closer together than the sum of their radii produce `Some(Contact)` with normal pointing from body A's center toward body B's center and `penetration == r_a + r_b - dist` (within 1e-4) (spec Acceptance Scenario 1, SC-001).
+- [X] T012 [P] [US1] Add test in `src/collision/circle.rs` tests: two circles farther apart than the sum of their radii produce `None` (spec Acceptance Scenario 2).
+- [X] T013 [P] [US1] Add test in `src/broadphase.rs` tests: given bodies scattered so only a few pairs' AABBs overlap, `candidate_pairs` returns exactly those overlapping pairs and no others (spec Acceptance Scenario 3, SC-003).
+- [X] T014 [P] [US1] Add test in `src/collision/circle.rs` tests: two circles exactly touching (`dist == r_a + r_b`) do not flicker into a false contact from float noise — confirm the epsilon/slop guard from `research.md` (spec Edge Cases).
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Implement `circle_vs_circle` in `src/collision/circle.rs`: compare center distance to `r_a + r_b`, normal `= (b.position - a.position).normalize()`, `penetration = r_a + r_b - dist`, applying the epsilon guard so `penetration <= 0` (or below tolerance) yields `None` (per `research.md`). Depends on Foundational (T003–T010).
-- [ ] T016 [US1] Wire `collision::detect_contacts` (`src/collision/mod.rs`) to call the real `circle_vs_circle` for Circle–Circle pairs in place of the stub, producing a one-point `Manifold` on `Some`. Depends on T015.
+- [X] T015 [US1] Implement `circle_vs_circle` in `src/collision/circle.rs`: compare center distance to `r_a + r_b`, normal `= (b.position - a.position).normalize()`, `penetration = r_a + r_b - dist`, applying the epsilon guard so `penetration <= 0` (or below tolerance) yields `None` (per `research.md`). Depends on Foundational (T003–T010).
+- [X] T016 [US1] Wire `collision::detect_contacts` (`src/collision/mod.rs`) to call the real `circle_vs_circle` for Circle–Circle pairs in place of the stub, producing a one-point `Manifold` on `Some`. Depends on T015.
 
 **Checkpoint**: `cargo test` passes and independently verifies User Story 1 (circle–circle detection + broadphase filtering) without needing US2 or US3.
 
@@ -84,17 +84,17 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] Add test in `src/collision/circle.rs` tests: a circle overlapping the flat face of a static polygon produces a contact with normal pointing away from that face and `penetration == radius - distance_to_face` (spec Acceptance Scenario 1).
-- [ ] T018 [P] [US2] Add test in `src/collision/circle.rs` tests: a circle whose center is nearest a polygon's corner (not any single face) produces a contact whose normal points away from that corner, not from either adjacent face (spec Acceptance Scenario 2 / Edge Case, vertex-region fallback from `research.md`).
-- [ ] T019 [P] [US2] Add test in `src/collision/polygon.rs` tests: two overlapping polygons, one rotated to an arbitrary angle via `Rot2::new`, produce a manifold of one or two points on the shared overlap region with a single normal aligned to the axis of minimum penetration (spec Acceptance Scenario 3).
-- [ ] T020 [P] [US2] Add test in `src/collision/polygon.rs` tests: a box overlapping a shallow-angle rotated static polygon ("ramp") produces contact point(s) lying on the true overlap region with the correct normal — the numeric groundwork for the milestone's box-on-ramp acceptance criterion (spec Acceptance Scenario 4, SC-002).
-- [ ] T021 [P] [US2] Add test in `src/collision/polygon.rs` tests: two deeply overlapping polygons (one nearly contained in the other) still produce a non-degenerate manifold of one or two points, not zero (spec Edge Cases).
+- [X] T017 [P] [US2] Add test in `src/collision/circle.rs` tests: a circle overlapping the flat face of a static polygon produces a contact with normal pointing away from that face and `penetration == radius - distance_to_face` (spec Acceptance Scenario 1).
+- [X] T018 [P] [US2] Add test in `src/collision/circle.rs` tests: a circle whose center is nearest a polygon's corner (not any single face) produces a contact whose normal points away from that corner, not from either adjacent face (spec Acceptance Scenario 2 / Edge Case, vertex-region fallback from `research.md`).
+- [X] T019 [P] [US2] Add test in `src/collision/polygon.rs` tests: two overlapping polygons, one rotated to an arbitrary angle via `Rot2::new`, produce a manifold of one or two points on the shared overlap region with a single normal aligned to the axis of minimum penetration (spec Acceptance Scenario 3).
+- [X] T020 [P] [US2] Add test in `src/collision/polygon.rs` tests: a box overlapping a shallow-angle rotated static polygon ("ramp") produces contact point(s) lying on the true overlap region with the correct normal — the numeric groundwork for the milestone's box-on-ramp acceptance criterion (spec Acceptance Scenario 4, SC-002).
+- [X] T021 [P] [US2] Add test in `src/collision/polygon.rs` tests: two deeply overlapping polygons (one nearly contained in the other) still produce a non-degenerate manifold of one or two points, not zero (spec Edge Cases).
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Implement `circle_vs_polygon` in `src/collision/circle.rs`: project the circle's (world-space) center onto each polygon edge (segment-clamped), track the globally closest point/edge, and fall back to a vertex normal when the center is outside every edge's clamped region (nearest a corner), per `research.md`. Depends on Foundational; shares file with T015.
-- [ ] T023 [US2] Implement `polygon_vs_polygon` in `src/collision/polygon.rs`: SAT over both bodies' world-space face normals (faces transformed by each body's `orientation`), tracking the axis of minimum penetration and returning `None` on any axis with positive separation; on overlap, pick the reference face (winning axis's body) and incident face (most anti-parallel face on the other body), then clip the incident face's two endpoints against the reference face's side planes to produce 1–2 `Contact`s, exactly per README § Narrowphase / `research.md`. Depends on Foundational.
-- [ ] T024 [US2] Wire `collision::detect_contacts` to call the real `circle_vs_polygon` and `polygon_vs_polygon` for the remaining shape-pair combinations in place of their stubs. Depends on T022, T023.
+- [X] T022 [US2] Implement `circle_vs_polygon` in `src/collision/circle.rs`: project the circle's (world-space) center onto each polygon edge (segment-clamped), track the globally closest point/edge, and fall back to a vertex normal when the center is outside every edge's clamped region (nearest a corner), per `research.md`. Depends on Foundational; shares file with T015.
+- [X] T023 [US2] Implement `polygon_vs_polygon` in `src/collision/polygon.rs`: SAT over both bodies' world-space face normals (faces transformed by each body's `orientation`), tracking the axis of minimum penetration and returning `None` on any axis with positive separation; on overlap, pick the reference face (winning axis's body) and incident face (most anti-parallel face on the other body), then clip the incident face's two endpoints against the reference face's side planes to produce 1–2 `Contact`s, exactly per README § Narrowphase / `research.md`. Depends on Foundational.
+- [X] T024 [US2] Wire `collision::detect_contacts` to call the real `circle_vs_polygon` and `polygon_vs_polygon` for the remaining shape-pair combinations in place of their stubs. Depends on T022, T023.
 
 **Checkpoint**: `cargo test` passes for all three narrowphase pair types; US1 and US2 are both independently verified via tests.
 
@@ -108,9 +108,9 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 ### Implementation for User Story 3
 
-- [ ] T025 [US3] Create `examples/ramp.rs`: a `#[macroquad::main("ramp")]` scaffold with a static rotated polygon "ramp" body (`RigidBody::new_static` with `Shape::polygon(...)` and a non-identity `orientation` via `Rot2::new(angle)`) and a dynamic box body (`RigidBody::new_dynamic` with `Shape::polygon(...)` box vertices) positioned to fall onto the ramp. Depends on Foundational + US1 + US2 (T003–T024).
-- [ ] T026 [US3] In `examples/ramp.rs`'s per-frame loop, call `world.step(macroquad::time::get_frame_time())`, draw the ramp and box shapes for visual context, then for every `Manifold` in `world.contacts()` draw each `Contact`'s `point` (small marker) and `normal` (short line/arrow from that point). Depends on T025.
-- [ ] T027 [US3] Run `cargo run --example ramp --release` and visually confirm the box's contact point(s)/normal(s) against the ramp coincide with the true overlap geometry, matching README's M2 "done when" criterion and spec SC-002. Depends on T026.
+- [X] T025 [US3] Create `examples/ramp.rs`: a `#[macroquad::main("ramp")]` scaffold with a static rotated polygon "ramp" body (`RigidBody::new_static` with `Shape::polygon(...)` and a non-identity `orientation` via `Rot2::new(angle)`) and a dynamic box body (`RigidBody::new_dynamic` with `Shape::polygon(...)` box vertices) positioned to fall onto the ramp. Depends on Foundational + US1 + US2 (T003–T024).
+- [X] T026 [US3] In `examples/ramp.rs`'s per-frame loop, call `world.step(macroquad::time::get_frame_time())`, draw the ramp and box shapes for visual context, then for every `Manifold` in `world.contacts()` draw each `Contact`'s `point` (small marker) and `normal` (short line/arrow from that point). Depends on T025.
+- [X] T027 [US3] Run `cargo run --example ramp --release` and visually confirm the box's contact point(s)/normal(s) against the ramp coincide with the true overlap geometry, matching README's M2 "done when" criterion and spec SC-002. Depends on T026.
 
 **Checkpoint**: All three user stories are independently verified — `cargo test` covers US1/US2, the running example covers US3.
 
@@ -120,10 +120,10 @@ Single project (per plan.md): `src/` and `examples/` at the repository root; no 
 
 **Purpose**: Remaining spec edge cases and milestone close-out.
 
-- [ ] T028 [P] Add test in `src/world.rs` tests: stepping a world containing two overlapping bodies never changes either body's `velocity` or `position` as a result of the detected contact — collision detection alone produces no motion beyond ordinary gravity integration (spec FR-007, SC-004).
-- [ ] T029 [P] Add test in `src/broadphase.rs` tests: `candidate_pairs` on zero or one body returns an empty list without panicking (spec Edge Cases groundwork).
-- [ ] T030 Run the full `quickstart.md` validation end-to-end: `cargo test` and `cargo run --example ramp --release`, confirming every milestone exit criterion in `quickstart.md` is met.
-- [ ] T031 Update `README.md`'s M2 checklist entry from `[ ]` to `[x]` (matching the existing M0/M1 entries' style) once T030's verification passes.
+- [X] T028 [P] Add test in `src/world.rs` tests: stepping a world containing two overlapping bodies never changes either body's `velocity` or `position` as a result of the detected contact — collision detection alone produces no motion beyond ordinary gravity integration (spec FR-007, SC-004).
+- [X] T029 [P] Add test in `src/broadphase.rs` tests: `candidate_pairs` on zero or one body returns an empty list without panicking (spec Edge Cases groundwork).
+- [X] T030 Run the full `quickstart.md` validation end-to-end: `cargo test` and `cargo run --example ramp --release`, confirming every milestone exit criterion in `quickstart.md` is met.
+- [X] T031 Update `README.md`'s M2 checklist entry from `[ ]` to `[x]` (matching the existing M0/M1 entries' style) once T030's verification passes.
 
 ---
 

@@ -136,6 +136,45 @@ decisions that still had more than one reasonable implementation.
     what produces contact-state flicker at the boundary, which the spec
     calls out explicitly as an edge case to avoid.
 
+## Decision: Contact normal direction is shape-pair-specific, not a fixed body-index convention
+
+- **Decision**: For circle–circle, `Contact.normal` points from the pair's
+  first body toward its second (FR-002, literal). For any pair involving a
+  polygon (circle–polygon or polygon–polygon), `Contact.normal` instead
+  always points away from the polygon's touching face/vertex toward the
+  other shape — independent of which body happens to be first/second by
+  `BodyId`/array order.
+- **Rationale**: Spec US2 Acceptance Scenario 1 states unconditionally that
+  a circle overlapping a polygon's face produces a normal "pointing away
+  from that face" — this must hold regardless of which body was added to
+  the `World` first. A strict "always first-body-to-second-body" rule
+  (as originally sketched in `data-model.md`'s first draft) is
+  un-satisfiable simultaneously with that scenario whenever the circle
+  happens to be added before the polygon. Making the polygon-involving
+  direction depend on the *shape*, not array order, resolves the conflict
+  and matches the well-known reference-implementation pattern (Randy
+  Gaul's impulse-engine circle/polygon dispatch, README References):
+  `PolygonToCircle` collision is computed by calling the same
+  `CircleToPolygon` routine with arguments swapped and using its result
+  as-is — not by re-deriving a body-index-relative sign.
+- **Alternatives considered**:
+  - *Strict body_a → body_b normal for every shape pair, flipping when the
+    polygon ends up first* — rejected: this is exactly the convention that
+    conflicts with the spec's own literal acceptance scenario wording; it
+    would make "does the normal point away from the face" depend on
+    insertion order, which is not a property the spec describes as
+    conditional.
+  - *Track reference/incident roles explicitly for circle–polygon (mirroring
+    polygon–polygon's reference/incident face selection)* — unnecessary:
+    circle–polygon only ever has the polygon supplying the reference face
+    (a circle has no faces), so there is no ambiguity to resolve the way
+    polygon–polygon's SAT axis choice has.
+- **Consequence for polygon–polygon**: by the same reasoning, `Contact.normal`
+  for a polygon pair points from the reference face's body toward the
+  incident body (the standard SAT/clipping convention), again independent
+  of `BodyId` array order — not flipped to force a fixed body_a → body_b
+  reading.
+
 ## Output
 
 All Technical Context fields are resolved (none were `NEEDS

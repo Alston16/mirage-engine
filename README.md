@@ -128,7 +128,7 @@ load. That's expected behavior for this class of solver, not a bug to chase.
       fixed-timestep accumulator, `examples/bouncing.rs` rendering circles
       with no collision yet.
       *Done when:* circles fall off-screen at `9.81 m/s²` under macroquad.
-- [ ] **M2 — Collision detection.** AABB broadphase, all three narrowphase
+- [x] **M2 — Collision detection.** AABB broadphase, all three narrowphase
       pairs, manifold generation, contact points/normals debug-drawn.
       *Done when:* contacts render correctly for a box resting on a rotated
       ramp.

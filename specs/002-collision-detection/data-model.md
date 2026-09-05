@@ -69,7 +69,7 @@ A single point of overlap between two bodies. New this milestone.
 | Field | Type | Notes |
 |---|---|---|
 | `point` | `Vec2` | World-space contact position. |
-| `normal` | `Vec2` | Unit vector, pointing from the first body toward the second (per spec FR-002/Acceptance Scenario 1). |
+| `normal` | `Vec2` | Unit vector. For circle–circle, points from the pair's first body toward its second (FR-002/Acceptance Scenario 1). For any pair involving a polygon, points away from the polygon's touching face/vertex toward the other shape, regardless of body order (US2 Acceptance Scenario 1) — see `research.md`. |
 | `penetration` | `f32` | `>= 0.0`, depth of overlap along `normal`. |
 
 - **Validation rules**: `normal` MUST be unit length (or `Vec2::ZERO` only

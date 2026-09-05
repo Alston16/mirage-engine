@@ -5,7 +5,7 @@
 //! y", so drawing flips the y axis: `screen_y = screen_height() - world_y`.
 
 use macroquad::prelude::*;
-use mirage::{RigidBody, Vec2, World};
+use mirage::{RigidBody, Shape, Vec2, World};
 
 #[macroquad::main("bouncing")]
 async fn main() {
@@ -18,7 +18,7 @@ async fn main() {
         .map(|(i, &radius)| {
             let x = (i as f32 - (radii.len() as f32 - 1.0) / 2.0) * 70.0;
             let y = 350.0 + i as f32 * 60.0;
-            let id = world.add_body(RigidBody::new_dynamic(Vec2::new(x, y), 1.0));
+            let id = world.add_body(RigidBody::new_dynamic(Vec2::new(x, y), 1.0, Shape::circle(radius)));
             (id, radius)
         })
         .collect();
