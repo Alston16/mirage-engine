@@ -124,7 +124,7 @@ load. That's expected behavior for this class of solver, not a bug to chase.
 - [x] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/
       `Rot2` and unit tests.
       *Done when:* `cargo test` passes with dot/cross/rotation coverage.
-- [ ] **M1 — Bodies, gravity, integrator.** `RigidBody`, `World::step`,
+- [x] **M1 — Bodies, gravity, integrator.** `RigidBody`, `World::step`,
       fixed-timestep accumulator, `examples/bouncing.rs` rendering circles
       with no collision yet.
       *Done when:* circles fall off-screen at `9.81 m/s²` under macroquad.

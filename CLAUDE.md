@@ -79,4 +79,5 @@ The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at `specs/001-bodies-gravity-integrator/plan.md`.
 <!-- SPECKIT END -->
