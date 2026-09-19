@@ -88,17 +88,29 @@ code while reading it for this plan.
   iteration — rejected: fails FR-004 and cannot handle a box's two contact
   points or any stack.
 
-## Decision: restitution resting threshold `|g|·dt`
+## Decision: restitution uses the pre-gravity approach velocity
 
-- **Decision**: if the closing speed `−vn₀ < |g|·dt + ε`, use `e = 0` for
-  that contact. The solver receives gravity and `dt` for this.
-- **Rationale**: a resting body gains `g·dt` of closing speed every step;
-  with `e = 1` an unthresholded solver bounces it back each step, causing
-  perpetual micro-hopping. Tying the threshold to gravity keeps it
-  scale-independent (demo world units are pixels, not metres). Satisfies
-  the "settle to rest" edge case.
-- **Alternatives considered**: fixed 1.0 m/s threshold (Box2D) —
-  rejected: meaningless when a world unit is a pixel.
+- **Decision**: the bounce target is `−e·(vr·n)₀` where `(vr·n)₀` is the
+  contact's normal velocity with this step's own gravity kick removed:
+  `vn₀ − (g·dt)·n · (b_dynamic − a_dynamic)`. Bounce only if the approach
+  speed exceeds a tiny noise floor (`1e-4`); otherwise `e = 0`. The solver
+  still receives gravity and `dt` for this.
+- **Why the original `|g|·dt` threshold was replaced**: `World::step` adds
+  `g·dt` to velocity *before* the solver runs. With restitution applied to
+  that post-kick speed, a bouncing ball follows `v → e·(v + g·dt)`, whose
+  fixed point `v* = e·g·dt/(1 − e)` lies *above* any `|g|·dt` threshold
+  (closing speed there is `g·dt/(1 − e)`), so an `e = 0.8` ball never
+  settles: it locks into a stable 9-step hop about 0.02 units tall. Found
+  by the settling test (T032); verified by tracing the trajectory. Positional
+  correction does not remove it.
+- **Rationale**: a resting body then has approach speed 0 (no bounce), and a
+  bouncing body decays as `v → e·v` toward rest. It is scale-independent
+  (no fixed m/s threshold), and for a single contact it still reduces to the
+  README's `j` because `(vr·n)₀` is simply the approach velocity.
+- **Alternatives considered**: a larger threshold `c·|g|·dt` — rejected: the
+  fixed point's closing speed is `g·dt/(1 − e)`, so no constant `c` works for
+  every `e`; a fixed 1 m/s threshold (Box2D) — rejected: meaningless when a
+  world unit is a pixel.
 
 ## Decision: positional correction is a slop-gated linear projection, separate from velocity
 

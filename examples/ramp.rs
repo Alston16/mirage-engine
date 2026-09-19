@@ -1,8 +1,9 @@
 //! M2 acceptance demo: a box falls onto a rotated ramp and the resulting
 //! contact point(s)/normal(s) are debug-drawn, so the milestone's "done
 //! when" criterion (correct contacts for a box resting on a rotated ramp)
-//! can be verified visually. No collision response yet (that's M3) — the
-//! box will visibly settle *into* the ramp rather than bouncing/stopping.
+//! can be verified visually. Since M3 contacts are resolved, so the box
+//! reacts to the ramp — but there is no friction until M4, so it slides down
+//! rather than staying put.
 //!
 //! World space uses "up is positive y" (matching the engine's gravity
 //! vector); screen space is macroquad's "down is positive y", so drawing

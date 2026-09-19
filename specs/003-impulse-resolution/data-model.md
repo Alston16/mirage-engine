@@ -28,7 +28,7 @@ No state persists between steps (no warm-starting until M4).
 | `n` | Contact normal, unit, `a → b` |
 | `r_a`, `r_b` | `point − position` for each body |
 | `k` | Effective mass denominator `K = 1/m_a + 1/m_b + (r_a×n)²/I_a + (r_b×n)²/I_b` |
-| `bounce` | Target normal velocity `−e·vn₀`, or `0` below the resting threshold |
+| `bounce` | Target normal velocity `−e·vn₀`, where `vn₀` is the approach velocity before this step's gravity kick; `0` if not approaching |
 | `j_acc` | Accumulated normal impulse; invariant `j_acc ≥ 0` |
 | `penetration` | Depth from the manifold, used by position correction |
 | `share` | `1 / points in the source manifold`; scales position correction so a two-point manifold is not corrected twice as hard as a one-point one |
