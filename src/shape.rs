@@ -44,6 +44,11 @@ impl Shape {
 
     /// Builds a convex polygon from counter-clockwise-wound local-space
     /// vertices, deriving each edge's outward normal.
+    ///
+    /// The vertices must be centered so that local `(0, 0)` — the point the
+    /// body rotates about — is the polygon's actual center of mass. This is
+    /// the caller's responsibility: no recentering happens here or in
+    /// `inertia`. See `inertia`'s doc comment for what breaks if it isn't.
     pub fn polygon(vertices: Vec<Vec2>) -> Self {
         let normals = (0..vertices.len())
             .map(|i| {
@@ -78,8 +83,21 @@ impl Shape {
     ///
     /// Circle: `I = ½·m·r²`. Polygon (triangle fan about the origin):
     /// `I = m / (6·Σcᵢ) · Σ cᵢ·(pᵢ·pᵢ + pᵢ·pᵢ₊₁ + pᵢ₊₁·pᵢ₊₁)` with
-    /// `cᵢ = pᵢ × pᵢ₊₁`. Assumes the polygon's vertices are centered on its
-    /// center of mass, so the local origin *is* the center of mass.
+    /// `cᵢ = pᵢ × pᵢ₊₁`.
+    ///
+    /// This assumes the polygon's vertices are centered on its center of
+    /// mass (COM), i.e. that the local origin *is* the COM — the formula
+    /// integrates about `(0, 0)` with no centroid computation or shift.
+    /// Nothing here checks that assumption. If it doesn't hold (e.g. an
+    /// off-center polygon built with a corner at the local origin instead
+    /// of its centroid), `I` is silently computed about the wrong point:
+    /// it won't panic, but the body's angular response to torque/impulses
+    /// will be physically wrong (over- or under-rotating, drifting under
+    /// spin that should be stable). If a future milestone needs polygons
+    /// built from arbitrary (non-centered) vertices, this is the spot that
+    /// would need a centroid computation feeding the parallel-axis theorem
+    /// before this integral, plus a recentering of the stored vertices (or
+    /// of `RigidBody::position`) so `position` still tracks the true COM.
     pub fn inertia(&self, mass: f32) -> f32 {
         match self {
             Shape::Circle { radius } => 0.5 * mass * radius * radius,
