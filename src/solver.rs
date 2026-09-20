@@ -7,12 +7,25 @@
 
 use crate::{Manifold, RigidBody, Vec2};
 
-/// Velocity-solver passes per fixed step (README § Resolution: ~8).
-pub(crate) const VELOCITY_ITERATIONS: usize = 8;
+/// Velocity-solver passes per fixed step (README § Resolution).
+///
+/// Tuned in M4 on 1 m bodies: with friction and warm-starting, 8 iterations
+/// lets a 10-box tower drift and (at the smaller slop below) collapse, 10 is
+/// marginal, and 12 stands but leaves only ~28% margin on horizontal drift.
+/// 16 stands with ~56% drift margin and settles below 0.01 m/s by ~15 s. See
+/// specs/004-friction-and-stacking/research.md § Tuning results.
+pub(crate) const VELOCITY_ITERATIONS: usize = 16;
 
 /// Penetration tolerated before positional correction kicks in, so resting
-/// contacts don't jitter.
-pub(crate) const PENETRATION_SLOP: f32 = 0.01;
+/// contacts don't jitter — and therefore roughly the compression per
+/// interface of a resting stack (10 interfaces ≈ 10 × slop).
+///
+/// Tuned in M4 (world units, calibrated for ~1 m bodies): 0.01 compresses a
+/// 10-box tower by ~10% of a box; 0.003 by ~3.4% (over the 3% settled bound);
+/// 0.002 by ~2.4% at 10 s, the largest value that stays within it. Much below
+/// that (0.001 in the prototype) resting contacts start to jitter. It must
+/// stay well above the narrowphase's own contact threshold (`1e-4`).
+pub(crate) const PENETRATION_SLOP: f32 = 0.002;
 
 /// Fraction of the excess penetration removed per step.
 pub(crate) const CORRECTION_PERCENT: f32 = 0.4;
@@ -27,6 +40,42 @@ const MIN_BOUNCE_SPEED: f32 = 1e-4;
 /// touches, and `max` would let a rough floor grip it.
 pub(crate) fn combine_friction(a: f32, b: f32) -> f32 {
     (a * b).sqrt()
+}
+
+/// One remembered contact: the accumulated impulses it ended the last step
+/// with, keyed by which bodies and which geometric feature it was.
+struct CachedImpulse {
+    body_a: u32,
+    body_b: u32,
+    feature: u32,
+    j: f32,
+    jt: f32,
+}
+
+/// Accumulated impulses from the previous step, used to warm-start contacts
+/// that persist (README § Resolution, warm-starting).
+///
+/// A plain `Vec` scanned in order — no hashing — so lookups are
+/// deterministic. It is replaced wholesale every step, so a contact that has
+/// ended is forgotten immediately and can never leave a stale impulse behind.
+#[derive(Default)]
+pub(crate) struct ImpulseCache {
+    entries: Vec<CachedImpulse>,
+}
+
+impl ImpulseCache {
+    /// `(j, jt)` remembered for this `(body_a, body_b, feature)`, if any.
+    fn find(&self, body_a: u32, body_b: u32, feature: u32) -> Option<(f32, f32)> {
+        self.entries
+            .iter()
+            .find(|e| e.body_a == body_a && e.body_b == body_b && e.feature == feature)
+            .map(|e| (e.j, e.jt))
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
 }
 
 /// Per-contact-point solver state, built once per step and discarded.
@@ -47,11 +96,19 @@ struct ContactState {
     mu: f32,
     /// Target normal velocity `−e·(vr·n)₀`, or `0` for a resting contact.
     bounce: f32,
+    /// Geometric feature id from the source `Contact`; part of the cache key.
+    feature: u32,
     /// Accumulated normal impulse; invariant `j_acc >= 0`.
     j_acc: f32,
     /// Accumulated tangent impulse; invariant `|jt_acc| <= μ · j_acc` after
     /// each tangent solve.
     jt_acc: f32,
+    /// Impulses this contact was seeded with from the cache (`0` if new).
+    /// Only tests read these.
+    #[cfg_attr(not(test), allow(dead_code))]
+    j_seed: f32,
+    #[cfg_attr(not(test), allow(dead_code))]
+    jt_seed: f32,
     penetration: f32,
     /// `1 / points in the source manifold`.
     share: f32,
@@ -121,8 +178,11 @@ fn build_contacts(
                 k_t,
                 mu,
                 bounce,
+                feature: point.feature,
                 j_acc: 0.0,
                 jt_acc: 0.0,
+                j_seed: 0.0,
+                jt_seed: 0.0,
                 penetration: point.penetration,
                 share,
             });
@@ -158,10 +218,26 @@ fn relative_velocity(bodies: &[RigidBody], c: &ContactState) -> Vec2 {
 fn solve(
     bodies: &mut [RigidBody],
     manifolds: &[Manifold],
+    cache: &mut ImpulseCache,
     gravity: Vec2,
     dt: f32,
 ) -> Vec<ContactState> {
+    // `bounce` is fixed here, from the true approach velocity — before the
+    // seeding below alters any velocity.
     let mut contacts = build_contacts(bodies, manifolds, gravity, dt);
+
+    // Warm start: a contact that persists from last step (same body pair and
+    // feature) begins from the impulses it ended with, applied to both bodies
+    // now, instead of from zero. A contact with no match starts at zero.
+    for c in &mut contacts {
+        if let Some((j, jt)) = cache.find(c.a as u32, c.b as u32, c.feature) {
+            c.j_acc = j;
+            c.jt_acc = jt;
+            c.j_seed = j;
+            c.jt_seed = jt;
+            apply_impulse(bodies, c, c.n * j + c.t * jt);
+        }
+    }
 
     for _ in 0..VELOCITY_ITERATIONS {
         for c in &mut contacts {
@@ -191,6 +267,19 @@ fn solve(
             apply_impulse(bodies, c, c.n * j);
         }
     }
+
+    // Remember this step's impulses for the next one. Replacing (not
+    // merging) drops every contact that isn't touching now.
+    cache.entries = contacts
+        .iter()
+        .map(|c| CachedImpulse {
+            body_a: c.a as u32,
+            body_b: c.b as u32,
+            feature: c.feature,
+            j: c.j_acc,
+            jt: c.jt_acc,
+        })
+        .collect();
     contacts
 }
 
@@ -200,10 +289,11 @@ fn solve(
 pub(crate) fn resolve(
     bodies: &mut [RigidBody],
     manifolds: &[Manifold],
+    cache: &mut ImpulseCache,
     gravity: Vec2,
     dt: f32,
 ) {
-    let contacts = solve(bodies, manifolds, gravity, dt);
+    let contacts = solve(bodies, manifolds, cache, gravity, dt);
     correct_positions(bodies, &contacts);
 }
 
@@ -312,7 +402,7 @@ mod tests {
         // m·g·dt, so the Coulomb limit on the tangent impulse is μ·m·g·dt.
         let mut bodies = sliding_box(2.0);
         let manifolds = detect_contacts(&bodies);
-        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        solve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::new(0.0, -9.81), FIXED_DT);
         let lost = 2.0 - bodies[1].velocity.x;
         let expected = 0.5 * 9.81 * FIXED_DT;
         assert!(
@@ -326,7 +416,7 @@ mod tests {
         let mut bodies = sliding_box(2.0);
         bodies[1] = bodies[1].clone().with_friction(0.0);
         let manifolds = detect_contacts(&bodies);
-        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        solve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::new(0.0, -9.81), FIXED_DT);
         assert_eq!(bodies[1].velocity.x, 2.0);
     }
 
@@ -340,7 +430,7 @@ mod tests {
         bodies[1].angular_velocity = 1.5;
         let manifolds = detect_contacts(&bodies);
         assert!(!manifolds.is_empty(), "scene must produce contacts");
-        let contacts = solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        let contacts = solve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::new(0.0, -9.81), FIXED_DT);
         assert!(!contacts.is_empty());
         for c in &contacts {
             assert!(c.j_acc >= 0.0, "pulling contact: j = {}", c.j_acc);
@@ -364,8 +454,88 @@ mod tests {
         let mut bodies = sliding_box(2.0);
         let floor_before = bodies[0].clone();
         let manifolds = detect_contacts(&bodies);
-        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        solve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::new(0.0, -9.81), FIXED_DT);
         assert_eq!(bodies[0], floor_before);
+    }
+
+    #[test]
+    fn matched_contact_is_seeded() {
+        let mut bodies = sliding_box(0.0);
+        let manifolds = detect_contacts(&bodies);
+        let mut cache = ImpulseCache::default();
+        let g = Vec2::new(0.0, -9.81);
+
+        let first = solve(&mut bodies, &manifolds, &mut cache, g, FIXED_DT);
+        assert!(first.iter().all(|c| c.j_seed == 0.0), "nothing to seed from on step one");
+        assert_eq!(cache.len(), first.len());
+
+        let second = solve(&mut bodies, &manifolds, &mut cache, g, FIXED_DT);
+        assert!(
+            second.iter().all(|c| c.j_seed > 0.0),
+            "persistent contacts should start from last step's impulse"
+        );
+        for (a, b) in first.iter().zip(&second) {
+            assert_eq!(b.j_seed, a.j_acc);
+            assert_eq!(b.jt_seed, a.jt_acc);
+        }
+    }
+
+    #[test]
+    fn vanished_contact_is_forgotten() {
+        let mut bodies = sliding_box(0.0);
+        let manifolds = detect_contacts(&bodies);
+        let mut cache = ImpulseCache::default();
+        solve(&mut bodies, &manifolds, &mut cache, Vec2::new(0.0, -9.81), FIXED_DT);
+        assert!(cache.len() > 0);
+
+        // Next step nothing is touching: no manifolds.
+        solve(&mut bodies, &[], &mut cache, Vec2::new(0.0, -9.81), FIXED_DT);
+        assert_eq!(cache.len(), 0, "stale impulses were kept");
+    }
+
+    #[test]
+    fn new_contact_starts_at_zero() {
+        let mut bodies = sliding_box(0.0);
+        let manifolds = detect_contacts(&bodies);
+        let mut cache = ImpulseCache::default();
+        let g = Vec2::new(0.0, -9.81);
+        solve(&mut bodies, &manifolds, &mut cache, g, FIXED_DT);
+
+        // Same bodies, but the contact features no longer match the cache.
+        let mut relabelled = manifolds.clone();
+        for m in &mut relabelled {
+            for p in &mut m.points {
+                p.feature += 1000;
+            }
+        }
+        let contacts = solve(&mut bodies, &relabelled, &mut cache, g, FIXED_DT);
+        assert!(contacts.iter().all(|c| c.j_seed == 0.0 && c.jt_seed == 0.0));
+    }
+
+    #[test]
+    fn seeding_does_not_change_the_bounce_target() {
+        // An approaching e = 1 ball: with a large impulse waiting in the
+        // cache, the restitution target must still come from the true
+        // approach velocity (5), not from a velocity the seeding altered.
+        let make = || {
+            let mut ball = RigidBody::new_dynamic(Vec2::new(0.0, 0.99), 1.0, Shape::circle(1.0))
+                .with_restitution(1.0);
+            ball.velocity = Vec2::new(0.0, -5.0);
+            vec![floor(), ball]
+        };
+        let mut plain = make();
+        let manifolds = detect_contacts(&plain);
+        let unseeded = solve(&mut plain, &manifolds, &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
+
+        let mut seeded_bodies = make();
+        let mut cache = ImpulseCache {
+            entries: vec![CachedImpulse { body_a: 0, body_b: 1, feature: 0, j: 3.0, jt: 0.0 }],
+        };
+        let seeded = solve(&mut seeded_bodies, &manifolds, &mut cache, Vec2::ZERO, FIXED_DT);
+
+        assert_eq!(seeded[0].j_seed, 3.0, "the cache entry should have matched");
+        assert_eq!(seeded[0].bounce, unseeded[0].bounce);
+        assert!((seeded[0].bounce - 5.0).abs() < 1e-4, "bounce = {}", seeded[0].bounce);
     }
 
     #[test]
@@ -438,7 +608,7 @@ mod tests {
         let manifolds = detect_contacts(&bodies);
         assert!(!manifolds.is_empty());
 
-        resolve(&mut bodies, &manifolds, Vec2::ZERO, FIXED_DT);
+        resolve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
 
         assert_eq!(bodies[0].velocity, Vec2::new(-1.0, 0.0));
         assert_eq!(bodies[1].velocity, Vec2::new(1.0, 0.0));
@@ -477,12 +647,12 @@ mod tests {
             body_a: BodyId(0),
             body_b: BodyId(1),
             points: vec![
-                Contact { point: Vec2::new(-1.0, 0.0), normal: n, penetration: 0.0 },
-                Contact { point: Vec2::new(1.0, 0.0), normal: n, penetration: 0.0 },
+                Contact { point: Vec2::new(-1.0, 0.0), normal: n, penetration: 0.0, feature: 0 },
+                Contact { point: Vec2::new(1.0, 0.0), normal: n, penetration: 0.0, feature: 1 },
             ],
         };
 
-        resolve(&mut bodies, &[manifold], Vec2::ZERO, FIXED_DT);
+        resolve(&mut bodies, &[manifold], &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
 
         // Right point started separating (vn = +1). A pulling impulse would
         // drag it toward 0; the clamp must leave it separating.
@@ -651,7 +821,7 @@ mod tests {
         ];
         let before = circle_pair_penetration(&bodies);
         let manifolds = detect_contacts(&bodies);
-        resolve(&mut bodies, &manifolds, Vec2::ZERO, FIXED_DT);
+        resolve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
         let after = circle_pair_penetration(&bodies);
 
         assert!(after < before, "overlap did not shrink: {before} -> {after}");
@@ -664,7 +834,7 @@ mod tests {
             let mut bodies = vec![floor(), body];
             let start_y = bodies[1].position.y;
             let manifolds = detect_contacts(&bodies);
-            resolve(&mut bodies, &manifolds, Vec2::ZERO, FIXED_DT);
+            resolve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
             bodies[1].position.y - start_y
         };
         let circle_lift = lift(RigidBody::new_dynamic(Vec2::new(0.0, 0.9), 1.0, Shape::circle(1.0)));
@@ -684,7 +854,7 @@ mod tests {
         let manifolds = detect_contacts(&bodies);
         assert!(!manifolds.is_empty(), "overlap must still be reported as a contact");
 
-        resolve(&mut bodies, &manifolds, Vec2::ZERO, FIXED_DT);
+        resolve(&mut bodies, &manifolds, &mut ImpulseCache::default(), Vec2::ZERO, FIXED_DT);
 
         assert_eq!((bodies[0].position, bodies[1].position), before);
     }

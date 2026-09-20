@@ -105,8 +105,8 @@ same physical contact from one step to the next (§ Resolution, warm-starting).
 
 ### Resolution
 
-Sequential impulses, iterated (N velocity iterations per step — tuned in M4,
-final value recorded in T038):
+Sequential impulses, iterated (16 velocity iterations per step, tuned in M4 on
+1 m bodies — a 10-box tower needs more than the ~8 of a bare solver):
 
 - Relative velocity at the contact point:
   `vr = (v_b + ω_b × r_b) − (v_a + ω_a × r_a)`
@@ -167,7 +167,9 @@ final value recorded in T038):
   term: after the velocity iterations, bodies are moved apart along `n` by
   `percent · max(depth − slop, 0) / (1/m_a + 1/m_b)`, split across the
   manifold's points and weighted by inverse mass (`percent = 0.4`,
-  `slop = 0.01` — tuned in M4, final values recorded in T038). Correcting positions directly, rather than biasing the
+  `slop = 0.002`, tuned in M4: a resting stack compresses by about `slop` per
+  interface, so 0.01 sinks a 10-box tower by ~10% of a box while 0.002 keeps
+  it near 2%; much smaller and resting contacts start to jitter). Correcting positions directly, rather than biasing the
   velocity, keeps the restitution solve energy-clean, and the slop stops
   resting contacts from jittering or sinking.
 

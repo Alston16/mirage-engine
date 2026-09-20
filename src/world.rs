@@ -1,7 +1,8 @@
 //! World — body storage, gravity, and the fixed-timestep integrator.
 
 use crate::collision::{self, manifold::Manifold};
-use crate::{solver, BodyId, RigidBody, Rot2, Vec2};
+use crate::solver::{self, ImpulseCache};
+use crate::{BodyId, RigidBody, Rot2, Vec2};
 
 /// Fixed simulation timestep: 1/60 second, per the README's integration
 /// model. Rendering framerate never influences this.
@@ -14,6 +15,8 @@ pub struct World {
     accumulator: f32,
     /// Contacts found during the most recently completed fixed substep.
     contacts: Vec<Manifold>,
+    /// Accumulated impulses of the previous substep, for warm-starting.
+    impulse_cache: ImpulseCache,
 }
 
 impl World {
@@ -25,6 +28,7 @@ impl World {
             gravity: Vec2::new(0.0, -9.81),
             accumulator: 0.0,
             contacts: Vec::new(),
+            impulse_cache: ImpulseCache::default(),
         }
     }
 
@@ -59,7 +63,9 @@ impl World {
     /// 2. broadphase + narrowphase to find contacts;
     /// 3. the impulse solver: velocity iterations — at every contact a
     ///    tangent (friction) impulse clamped to `±μ·j`, then the normal
-    ///    impulse — followed by positional correction (see `solver`);
+    ///    impulse — followed by positional correction (see `solver`).
+    ///    Contacts that persist from the previous substep start from the
+    ///    impulses they ended it with (warm-starting);
     /// 4. `x += v * dt` and `θ += ω * dt` — semi-implicit Euler, so
     ///    position uses the final post-impulse velocity.
     ///
@@ -78,7 +84,13 @@ impl World {
             }
 
             let manifolds = collision::detect_contacts(&self.bodies);
-            solver::resolve(&mut self.bodies, &manifolds, self.gravity, FIXED_DT);
+            solver::resolve(
+                &mut self.bodies,
+                &manifolds,
+                &mut self.impulse_cache,
+                self.gravity,
+                FIXED_DT,
+            );
 
             for body in &mut self.bodies {
                 if body.is_static {

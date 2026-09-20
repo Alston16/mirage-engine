@@ -267,3 +267,109 @@ final state exact instead.
 without panicking (5 s timeout). The two-ramp scene is the same geometry the
 headless tests use (15° holds, 35° slides). Watching it for ~15 s is left to
 the user.
+
+### T021 — FR-007 gate, in-repo (friction only, no cache, slop 0.01)
+
+`cargo test --release --test stacking tower -- --nocapture`, 10 boxes, 60 s:
+
+| Iterations | sink @ 2 / 10 / 60 s | max drift | max tilt | result |
+|---|---|---|---|---|
+| 8 | 2.18 / 9.01 / 9.01 | 6.53 | 3.14 | FAIL (heap) |
+| 12 | 1.43 / 9.01 / 9.01 | 7.48 | 3.13 | FAIL |
+| 16 | 1.08 / 9.01 / 9.01 | 7.81 | 3.11 | FAIL |
+| 20 | 0.87 / 9.01 / 9.01 | 8.28 | 3.13 | FAIL |
+| 30 | 0.57 / 9.01 / 9.01 | 8.71 | 3.14 | FAIL |
+
+The tower collapses at every iteration count (sink ≈ 9.0 = fallen; tilt ≈ π).
+Iteration tuning alone, even with friction, does not hold it, so FR-007's
+gate is met on the shipped code and warm-starting proceeds.
+
+### T031 — warm-starting lands (slop 0.01, 8 iterations)
+
+With the cache the real implementation reproduces the prototype: the 10-box
+tower stands (max tilt 0.011, max drift 0.07, sink 0.096 settled). The
+25.2° hold case that crept 0.038 m without it now moves 0.00000 (un-ignored,
+passes), confirming the closing-out hypothesis from T018.
+
+## Tuning results
+
+### Sweep: iterations × slop (T036)
+
+`cargo test --release --test stacking -- --nocapture`, friction + warm-start,
+tangent-then-normal. "Others" = heavy-on-light, mixed, pyramid (all pass in
+every row). Tall = 15-box tower. Peak sink is the largest top-box compression
+at any time.
+
+| It. | Slop | Peak sink (t) | Sink @ 2 / 10 / 60 s | Max drift | Speed > 0.01 last at | Tall | Tower test |
+|---|---|---|---|---|---|---|---|
+| 8 | 0.002 | 9.06 (33.9 s, collapsed) | 0.067 / 0.024 / 9.00 | 9.94 | 34.3 s | FAIL | FAIL (collapse) |
+| 8 | 0.003 | 0.153 (0.18 s) | 0.072 / 0.033 / 0.026 | 0.071 | 41.2 s | FAIL | FAIL |
+| 8 | 0.005 | 0.153 (0.18 s) | 0.082 / 0.052 / 0.046 | 0.071 | 41.2 s | FAIL | FAIL |
+| 10 | 0.002 | 0.151 (0.18 s) | 0.067 / 0.024 / 0.017 | 0.049 | 29.8 s | FAIL | FAIL |
+| 10 | 0.003 | 0.151 (0.18 s) | 0.072 / 0.034 / 0.027 | 0.048 | 29.7 s | FAIL | FAIL |
+| 10 | 0.005 | 0.152 (0.18 s) | 0.082 / 0.053 / 0.047 | 0.048 | 29.7 s | ok | FAIL |
+| 12 | 0.002 | 0.150 (0.17 s) | 0.067 / 0.024 / 0.018 | 0.036 | 22.3 s | FAIL | FAIL |
+| 12 | 0.003 | 0.150 (0.17 s) | 0.072 / 0.034 / 0.028 | 0.036 | 22.3 s | ok | FAIL |
+| 12 | 0.005 | 0.150 (0.18 s) | 0.082 / 0.053 / 0.048 | 0.036 | 22.3 s | ok | FAIL |
+| **16** | **0.002** | 0.150 (0.17 s) | 0.067 / **0.024** / 0.018 | **0.022** | **15.1 s** | ok | FAIL |
+| 16 | 0.003 | 0.150 (0.17 s) | 0.072 / 0.034 / 0.028 | 0.022 | 15.1 s | ok | FAIL |
+| 16 | 0.005 | 0.150 (0.17 s) | 0.082 / 0.053 / 0.048 | 0.022 | 15.1 s | ok | FAIL |
+
+Reading it:
+
+- **Slop sets settled compression** (≈ slop × interfaces): only 0.002 keeps
+  the 10 s value (0.024) within the spec's 3%; 0.003 gives 3.4%.
+- **Iterations set drift and settling time**: 8 is unstable at slop 0.002 and
+  slow to settle at any slop; 10 is marginal (the 15-box tower fails at
+  0.002–0.003); 12 stands but has only ~28% drift margin (0.036 vs 0.05); 16
+  has ~56% margin and settles by 15 s.
+- **Chosen: 16 iterations, slop 0.002, `CORRECTION_PERCENT` 0.4 unchanged.**
+- For that row, every bound passes **except the start-up transient** below:
+  speed never exceeds 0.1 m/s after 2 s or 0.01 m/s after 30 s; compression is
+  0.085 at 1 s, 0.067 at 2 s, 0.024 at 10 s, 0.018 at 60 s (falling, so no
+  creep); drift 0.022; tilt 0.004.
+
+### Start-up transient: the one bound tuning cannot meet
+
+Peak compression is ≈ 0.150 at t ≈ 0.17 s in **every** configuration
+(0.1499–0.1528), and stays above 0.10 until t ≈ 0.5 s (0.121 at 0.25 s, 0.102
+at 0.5 s, 0.085 at 1 s). It does not depend on iterations or slop.
+
+Why: the tower spawns exactly touching, gravity kicks every box at once, and a
+contact is only reported once penetration exceeds the narrowphase threshold
+(1e-4). Step 1 lets everything fall together (0.0027); only the floor
+interface penetrates. Each interface above is detected one step after the box
+below it has been stopped, having accumulated one more step of relative
+motion. Interface *i* therefore arrives with penetration ≈ i·g·dt², and the
+top box's total compression at peak is ≈ g·dt²·n(n+1)/2 = 0.0027 × 55 ≈ 0.149
+for n = 10 — matching the measured 0.150. The solver then removes it (40% of
+the excess per step), which is why it is gone by ~1 s.
+
+That is a property of zero-margin contact at 60 Hz with an exactly-touching
+spawn, not of the solver's tuning. It would only shrink with something
+outside M4's stated levers (contacts that exist *before* penetration —
+speculative margin — or a pre-settled spawn). SC-001 as amended ("≤ 10% at
+all times") therefore cannot hold in its first ~0.5 s. Per the Stop rule this
+is taken to `/speckit-clarify` rather than loosened in the test.
+
+### Step order A/B (T037), it = 16, slop 0.002
+
+| Order | Tower: last speed > 0.01 | Tower: max drift | Heavy-on-light | Notes |
+|---|---|---|---|---|
+| **tangent → normal** (kept) | 15.1 s | 0.022 | ok | |
+| normal → tangent | 12.5 s | 0.019 | **FAIL** | slightly calmer tower, but breaks the 1000:1 case |
+
+Tangent-then-normal is kept: the 1000:1 mass-ratio stack is an explicit edge
+case, and normal-first loses it. (Normal-first would make the final
+`|jt| ≤ μ·j` exact rather than within ~0.04%; not worth the regression.)
+
+### Stress tests at the chosen constants
+
+- Pyramid (5 rows, 30 s): max drift 0.0004–0.0011, max sink 0.041, tilt
+  0.0005 — passes with wide margin.
+- Mixed boxes and circles: at rest (speed 0, per-step motion 0) by 15 s.
+- 15-box tower: stands but sways slowly (top drifts up to ~1 m at ≤ 5° tilt
+  with a ~10 s period at slop 0.01); worst speed after 1 s 0.12–0.33 m/s.
+  "Soft under load", as the README says, not unstable.
+- 1000:1 stack: finite and bounded, but the light box is squeezed out and the
+  heavy box ends on the floor (y = 0.494). Stable, not stacked.

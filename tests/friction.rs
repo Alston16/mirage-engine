@@ -105,10 +105,9 @@ fn disc_rolls_down_ramp() {
 }
 
 /// FR-009's "within 5% of the threshold angle", below the threshold: holds.
-/// Measured without warm-starting: moved 0.038 in 10 s (limit 0.01) — friction
-/// at 95% of its limit creeps because each step's impulses restart from zero.
+/// Without warm-starting this crept 0.038 in 10 s (limit 0.01): friction at
+/// 95% of its limit needs each step's impulses to carry over.
 #[test]
-#[ignore = "needs warm-start (see tasks: cache); un-ignored once it lands"]
 fn just_below_threshold_holds() {
     let critical = 0.5_f32.atan();
     assert_holds(0.95 * critical);
