@@ -3,6 +3,7 @@ pub mod broadphase;
 pub mod collision;
 pub mod math;
 pub mod shape;
+pub mod solver;
 pub mod world;
 
 pub use body::{BodyId, RigidBody};

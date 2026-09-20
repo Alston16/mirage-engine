@@ -47,10 +47,12 @@ Single lib crate, no workspace split. Module responsibilities (see
 - `collision/` — narrowphase, split by shape pair (`circle.rs`, `polygon.rs`) plus manifold construction (`manifold.rs`). `mod.rs` dispatches by shape-pair type.
 - `solver.rs` — sequential-impulse resolution (normal + friction + Baumgarte positional correction).
 
-Data flow per `World::step`: broadphase produces candidate pairs →
-narrowphase produces `Contact`/`Manifold` (point, normal, penetration) →
-solver iterates impulses over manifolds (~8 velocity iterations) → integrator
-applies the resulting velocities to position (semi-implicit Euler).
+Data flow per `World::step`: gravity is added to velocity → broadphase
+produces candidate pairs → narrowphase produces `Contact`/`Manifold` (point,
+normal, penetration; normal always points from `body_a` to `body_b`) → solver
+iterates impulses over manifolds (~8 velocity iterations), then applies
+positional correction → integrator applies the resulting velocities to
+position and orientation (semi-implicit Euler).
 
 The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 `mirage` itself only ever produces geometry and body state.
@@ -79,5 +81,5 @@ The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/002-collision-detection/plan.md`.
+at `specs/003-impulse-resolution/plan.md`.
 <!-- SPECKIT END -->

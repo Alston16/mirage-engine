@@ -1,11 +1,11 @@
 //! World — body storage, gravity, and the fixed-timestep integrator.
 
 use crate::collision::{self, manifold::Manifold};
-use crate::{BodyId, RigidBody, Vec2};
+use crate::{solver, BodyId, RigidBody, Rot2, Vec2};
 
 /// Fixed simulation timestep: 1/60 second, per the README's integration
 /// model. Rendering framerate never influences this.
-const FIXED_DT: f32 = 1.0 / 60.0;
+pub(crate) const FIXED_DT: f32 = 1.0 / 60.0;
 
 /// Owns all bodies in the simulation and advances them forward in time.
 pub struct World {
@@ -41,7 +41,9 @@ impl World {
     }
 
     /// The contacts found during the most recently completed fixed
-    /// substep. Empty before the first substep has ever run.
+    /// substep, as they were when detected — before that substep's
+    /// impulses and position correction were applied. Empty before the
+    /// first substep has ever run.
     pub fn contacts(&self) -> &[Manifold] {
         &self.contacts
     }
@@ -51,11 +53,17 @@ impl World {
     /// Internally accumulates `dt_real` and drains it in fixed `1/60`
     /// increments, so the number and size of simulation steps never
     /// depends on how `dt_real` was chopped up across calls. Each fixed
-    /// step integrates every dynamic body with semi-implicit Euler:
-    /// `v += (F/m + g) * dt; x += v * dt` (here `F = 0`, so `v += g * dt`).
-    /// Static bodies are left untouched. Collision is detected but not
-    /// resolved — no impulse response, no change to velocity/position as a
-    /// result of a contact (that's M3); see `contacts()`.
+    /// step runs, in order:
+    ///
+    /// 1. `v += g * dt` for every dynamic body (`F = 0`);
+    /// 2. broadphase + narrowphase to find contacts;
+    /// 3. the impulse solver: velocity iterations, then positional
+    ///    correction (see `solver`);
+    /// 4. `x += v * dt` and `θ += ω * dt` — semi-implicit Euler, so
+    ///    position uses the final post-impulse velocity.
+    ///
+    /// Static bodies are never touched. There is no friction yet (M4);
+    /// impulses act only along contact normals.
     pub fn step(&mut self, dt_real: f32) {
         self.accumulator += dt_real;
 
@@ -65,10 +73,22 @@ impl World {
                     continue;
                 }
                 body.velocity += self.gravity * FIXED_DT;
-                body.position += body.velocity * FIXED_DT;
             }
+
+            let manifolds = collision::detect_contacts(&self.bodies);
+            solver::resolve(&mut self.bodies, &manifolds, self.gravity, FIXED_DT);
+
+            for body in &mut self.bodies {
+                if body.is_static {
+                    continue;
+                }
+                body.position += body.velocity * FIXED_DT;
+                body.orientation =
+                    Rot2::new(body.orientation.angle() + body.angular_velocity * FIXED_DT);
+            }
+
             self.accumulator -= FIXED_DT;
-            self.contacts = collision::detect_contacts(&self.bodies);
+            self.contacts = manifolds;
         }
     }
 }
@@ -191,30 +211,27 @@ mod tests {
     }
 
     #[test]
-    fn detecting_a_contact_does_not_alter_body_velocity_or_position() {
+    fn contacts_are_still_reported_after_resolution_is_wired_in() {
         let mut world = World::new();
-        // Overlapping from the very first step, so a contact is detected
-        // immediately.
-        let dynamic = world.add_body(RigidBody::new_dynamic(
-            Vec2::new(0.0, 0.5),
-            1.0,
-            Shape::circle(1.0),
-        ));
-        let ground = world.add_body(RigidBody::new_static(Vec2::new(0.0, 0.0), Shape::circle(1.0)));
+        world.add_body(RigidBody::new_dynamic(Vec2::new(0.0, 0.5), 1.0, Shape::circle(1.0)));
+        world.add_body(RigidBody::new_static(Vec2::new(0.0, 0.0), Shape::circle(1.0)));
 
         world.step(FIXED_DT);
 
-        // Contact detection ran...
         assert!(!world.contacts().is_empty());
+    }
 
-        // ...but the dynamic body still shows exactly the plain gravity
-        // integration result, and the static body is exactly unchanged —
-        // no impulse/position response happened (that's M3).
-        let expected_vy = -9.81 * FIXED_DT;
-        let expected_y = 0.5 + expected_vy * FIXED_DT;
-        assert!((world.body(dynamic).velocity.y - expected_vy).abs() < EPS);
-        assert!((world.body(dynamic).position.y - expected_y).abs() < EPS);
-        assert_eq!(world.body(ground).position, Vec2::new(0.0, 0.0));
-        assert_eq!(world.body(ground).velocity, Vec2::ZERO);
+    #[test]
+    fn angular_velocity_rotates_orientation() {
+        let mut world = World::new();
+        let mut body = RigidBody::new_dynamic(Vec2::new(0.0, 100.0), 1.0, Shape::circle(1.0));
+        body.angular_velocity = 1.0;
+        let id = world.add_body(body);
+
+        for _ in 0..60 {
+            world.step(FIXED_DT);
+        }
+
+        assert!((world.body(id).orientation.angle() - 1.0).abs() < 1e-3);
     }
 }

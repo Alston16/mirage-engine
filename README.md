@@ -12,9 +12,12 @@ to finish and understand *why* a box falls, hits the ground, and stops.
 
 ## Status
 
-Pre-MVP. Nothing runs yet — this README is the spec the code will be built
-against. The milestones below (§ MVP milestones) are the source of truth for
-progress; this section gets updated as they land.
+Pre-MVP. M0–M3 have landed: math, bodies and the fixed-timestep integrator,
+collision detection, and normal-impulse resolution with restitution
+(`cargo run --example bouncing --release`). Friction and stable stacking
+(M4) are next, so boxes on a ramp still slide and towers don't hold yet. The
+milestones below (§ MVP milestones) are the source of truth for progress;
+this section gets updated as they land.
 
 ## Design principles
 
@@ -110,10 +113,29 @@ Sequential impulses, iterated (~8 velocity iterations per step):
       1/m_a + 1/m_b + (r_a×n)²/I_a + (r_b×n)²/I_b
   ```
 
-- Coulomb friction as a tangent impulse, clamped to `±μ · j`.
-- Penetration is corrected with Baumgarte positional bias plus a slop term,
-  so resting contacts don't jitter and stacks don't slowly sink into the
-  floor.
+- `e` is the pair's combined restitution, `max(e_a, e_b)`, so a bouncy ball
+  bounces off a default (`e = 0`) floor. Restitution is applied to the
+  approach velocity *before* the current step's gravity: the contact step's
+  own `g·dt` kick is subtracted out of `vr·n`. A body resting under gravity
+  then approaches at 0 and never bounces, and a bouncing body decays
+  geometrically to rest. (Measured after the kick, `v → e·(v + g·dt)` has a
+  fixed point at `e·g·dt/(1 − e)`, so a ball settles into a tiny endless
+  hop instead of stopping.)
+- Because the solver iterates, `j` is applied in its iterated form. Before
+  the first iteration the target normal velocity `−e·(vr·n)₀` is fixed from
+  the pre-gravity approach velocity `(vr·n)₀`; each iteration then applies
+  `Δj = −(vr·n − (−e·(vr·n)₀)) / K`, where `K` is the denominator above,
+  and the *accumulated* `j` is clamped to `≥ 0` (contacts push, never pull).
+  For a single contact on its first iteration this is exactly the `j` above.
+- Coulomb friction as a tangent impulse, clamped to `±μ · j` (M4 — not yet
+  implemented).
+- Penetration is corrected with a Baumgarte-style positional bias plus a slop
+  term: after the velocity iterations, bodies are moved apart along `n` by
+  `percent · max(depth − slop, 0) / (1/m_a + 1/m_b)`, split across the
+  manifold's points and weighted by inverse mass (`percent = 0.4`,
+  `slop = 0.01`). Correcting positions directly, rather than biasing the
+  velocity, keeps the restitution solve energy-clean, and the slop stops
+  resting contacts from jittering or sinking.
 
 Known trade-off: sequential impulses converge iteratively rather than
 solving the contact LCP exactly, so tall stacks stay slightly soft under
@@ -132,7 +154,7 @@ load. That's expected behavior for this class of solver, not a bug to chase.
       pairs, manifold generation, contact points/normals debug-drawn.
       *Done when:* contacts render correctly for a box resting on a rotated
       ramp.
-- [ ] **M3 — Impulse resolution.** Normal impulses with restitution and
+- [x] **M3 — Impulse resolution.** Normal impulses with restitution and
       positional correction.
       *Done when:* a ball dropped with `e = 1.0` returns to within a few
       percent of its drop height, and with `e = 0` it stops dead.

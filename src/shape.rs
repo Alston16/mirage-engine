@@ -44,6 +44,11 @@ impl Shape {
 
     /// Builds a convex polygon from counter-clockwise-wound local-space
     /// vertices, deriving each edge's outward normal.
+    ///
+    /// The vertices must be centered so that local `(0, 0)` — the point the
+    /// body rotates about — is the polygon's actual center of mass. This is
+    /// the caller's responsibility: no recentering happens here or in
+    /// `inertia`. See `inertia`'s doc comment for what breaks if it isn't.
     pub fn polygon(vertices: Vec<Vec2>) -> Self {
         let normals = (0..vertices.len())
             .map(|i| {
@@ -70,6 +75,44 @@ impl Shape {
                 (world_vertices, world_normals)
             }
             Shape::Circle { .. } => unreachable!("polygon_world called on a Circle shape"),
+        }
+    }
+
+    /// Moment of inertia of this shape about its local origin for a body of
+    /// total `mass`.
+    ///
+    /// Circle: `I = ½·m·r²`. Polygon (triangle fan about the origin):
+    /// `I = m / (6·Σcᵢ) · Σ cᵢ·(pᵢ·pᵢ + pᵢ·pᵢ₊₁ + pᵢ₊₁·pᵢ₊₁)` with
+    /// `cᵢ = pᵢ × pᵢ₊₁`.
+    ///
+    /// This assumes the polygon's vertices are centered on its center of
+    /// mass (COM), i.e. that the local origin *is* the COM — the formula
+    /// integrates about `(0, 0)` with no centroid computation or shift.
+    /// Nothing here checks that assumption. If it doesn't hold (e.g. an
+    /// off-center polygon built with a corner at the local origin instead
+    /// of its centroid), `I` is silently computed about the wrong point:
+    /// it won't panic, but the body's angular response to torque/impulses
+    /// will be physically wrong (over- or under-rotating, drifting under
+    /// spin that should be stable). If a future milestone needs polygons
+    /// built from arbitrary (non-centered) vertices, this is the spot that
+    /// would need a centroid computation feeding the parallel-axis theorem
+    /// before this integral, plus a recentering of the stored vertices (or
+    /// of `RigidBody::position`) so `position` still tracks the true COM.
+    pub fn inertia(&self, mass: f32) -> f32 {
+        match self {
+            Shape::Circle { radius } => 0.5 * mass * radius * radius,
+            Shape::Polygon { vertices, .. } => {
+                let mut cross_sum = 0.0;
+                let mut weighted_sum = 0.0;
+                for i in 0..vertices.len() {
+                    let p = vertices[i];
+                    let q = vertices[(i + 1) % vertices.len()];
+                    let c = p.cross(q);
+                    cross_sum += c;
+                    weighted_sum += c * (p.dot(p) + p.dot(q) + q.dot(q));
+                }
+                mass * weighted_sum / (6.0 * cross_sum)
+            }
         }
     }
 
@@ -165,5 +208,36 @@ mod tests {
         let axis_aligned_extent = axis_aligned.max.x - axis_aligned.min.x;
         let rotated_extent = rotated.max.x - rotated.min.x;
         assert!(rotated_extent > axis_aligned_extent);
+    }
+
+    #[test]
+    fn circle_inertia_is_half_m_r_squared() {
+        assert!((Shape::circle(1.0).inertia(1.0) - 0.5).abs() < EPS);
+        assert!((Shape::circle(2.0).inertia(4.0) - 8.0).abs() < EPS);
+    }
+
+    #[test]
+    fn square_inertia_is_two_thirds_m_for_half_extent_one() {
+        let square = Shape::polygon(vec![
+            Vec2::new(-1.0, -1.0),
+            Vec2::new(1.0, -1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, 1.0),
+        ]);
+        assert!((square.inertia(3.0) - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rectangle_inertia_matches_closed_form() {
+        // 2 wide x 4 tall: I = m·(w² + h²)/12.
+        let rect = Shape::polygon(vec![
+            Vec2::new(-1.0, -2.0),
+            Vec2::new(1.0, -2.0),
+            Vec2::new(1.0, 2.0),
+            Vec2::new(-1.0, 2.0),
+        ]);
+        let mass = 5.0;
+        let expected = mass * (2.0 * 2.0 + 4.0 * 4.0) / 12.0;
+        assert!((rect.inertia(mass) - expected).abs() < 1e-4);
     }
 }
