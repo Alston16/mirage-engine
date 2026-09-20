@@ -97,11 +97,16 @@ Dispatched per shape pair:
   the incident face is clipped against the reference face's side planes to
   produce a 1–2 point contact manifold.
 
-Every contact carries a `point`, a `normal`, and a `penetration` depth.
+Every contact carries a `point`, a `normal`, a `penetration` depth, and a
+`feature` id naming which piece of geometry produced the point (a circle's
+single contact is always `0`; a polygon contact packs the reference face,
+incident face and clipped endpoint). The solver uses it only to recognize the
+same physical contact from one step to the next (§ Resolution, warm-starting).
 
 ### Resolution
 
-Sequential impulses, iterated (~8 velocity iterations per step):
+Sequential impulses, iterated (N velocity iterations per step — tuned in M4,
+final value recorded in T038):
 
 - Relative velocity at the contact point:
   `vr = (v_b + ω_b × r_b) − (v_a + ω_a × r_a)`
@@ -127,13 +132,42 @@ Sequential impulses, iterated (~8 velocity iterations per step):
   `Δj = −(vr·n − (−e·(vr·n)₀)) / K`, where `K` is the denominator above,
   and the *accumulated* `j` is clamped to `≥ 0` (contacts push, never pull).
   For a single contact on its first iteration this is exactly the `j` above.
-- Coulomb friction as a tangent impulse, clamped to `±μ · j` (M4 — not yet
-  implemented).
+- Coulomb friction as a tangent impulse. With the tangent `t = (−n_y, n_x)`
+  (the normal rotated 90°) and the same `vr` as above, the tangential
+  relative velocity is `vt = vr · t`, and the tangent effective mass uses the
+  same form as the normal one:
+
+  ```
+  K_t = 1/m_a + 1/m_b + (r_a×t)²/I_a + (r_b×t)²/I_b
+  Δjt = −vt / K_t
+  ```
+
+  The target is `vt = 0` (sticking; there is no "restitution" for friction).
+  The *accumulated* tangent impulse `jt` is clamped to `[−μ·j, +μ·j]`, where
+  `j` is the same contact's accumulated normal impulse — not the per-iteration
+  increment — so friction capacity grows as load builds up through a stack.
+  Each contact visit applies the tangent impulse first and the normal impulse
+  second, so the non-penetration constraint has the last word.
+- `μ` is the pair's combined friction, `√(μ_a · μ_b)` — symmetric in the two
+  bodies, `0` if either surface is frictionless, and equal to the shared
+  value when both match. (Not `max`, as for `e`: a `μ = 0` body must stay
+  frictionless whatever it touches.) Bodies default to `μ = 0.5`, so the
+  slide/hold threshold on a ramp is `θ = atan(μ)`.
+- Warm-starting: at the end of a step, each contact's accumulated `j` and
+  `jt` are remembered under `(body_a, body_b, feature)`. On the next step a
+  contact with the same key starts from those impulses (re-applied to both
+  bodies before iterating) instead of from zero; a contact with no match
+  starts at zero, and a contact that has ended is forgotten. Restitution's
+  target velocity is computed *before* this seeding, from the true approach
+  velocity. Without it a 10-box tower rocks itself apart, because a
+  two-point manifold solved one point at a time leaves a small residual
+  torque on every step; carrying the impulses across steps lets the
+  iterations converge over time instead of restarting.
 - Penetration is corrected with a Baumgarte-style positional bias plus a slop
   term: after the velocity iterations, bodies are moved apart along `n` by
   `percent · max(depth − slop, 0) / (1/m_a + 1/m_b)`, split across the
   manifold's points and weighted by inverse mass (`percent = 0.4`,
-  `slop = 0.01`). Correcting positions directly, rather than biasing the
+  `slop = 0.01` — tuned in M4, final values recorded in T038). Correcting positions directly, rather than biasing the
   velocity, keeps the restitution solve energy-clean, and the slop stops
   resting contacts from jittering or sinking.
 

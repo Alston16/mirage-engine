@@ -219,3 +219,51 @@ the solver's slop leaves resting bodies penetrating by roughly `slop`, so
 resting contacts persist. Any slop retune must stay well above `1e-4`
 (Q3, slop 0.001 already misbehaved). The narrowphase threshold itself is not
 changed by this feature.
+
+## In-repo notes
+
+Measurements and observations recorded while implementing (newest last).
+
+### T001 — Gate 0 (M3 baseline), 2026-09-20
+
+- `cargo test`: 69 passed, 0 failed.
+- `cargo build --examples --release` succeeds; `bouncing.exe` launches and
+  runs without panicking (killed by a 5 s timeout, exit 124).
+- The M3 behaviors themselves (`e = 0` stops dead, `e = 1` returns within 5%
+  of drop height) are covered headlessly by `e0_ball_stops_dead_on_floor` and
+  `e1_ball_returns_to_drop_height`, both passing. The visual check of the
+  bouncing window needs a person watching it; it is left to the user.
+
+### T018 — US1 friction results (no warm-starting yet)
+
+Measured on the tangent-solve implementation, before any cache:
+
+| Test | Measured | Reference |
+|---|---|---|
+| Box, 35° ramp, μ = 0.5 | a = 1.596 | 1.609 (0.8% off) |
+| Frictionless box, 30° | a = 4.905 | 4.905 (exact) |
+| Disc, 20°, rolling | a = 2.229, \|ω\|·r = 4.481 vs v = 4.458 | 2.237 (0.3% off); ω·r within 0.5% of v |
+| 30° ramp, distance in 3 s | μ = 0.3: 10.66 m; μ = 0.9: 0.009 m | higher μ slides less |
+| Box, 15° ramp (hold) | moved 0.0024 in 10 s, speed 0.0002 | < 0.01 / < 0.01 — passes |
+| Box, 1.05·atan μ (27.9°) | slides | passes |
+| Box, 0.95·atan μ (25.2°) (hold) | moved **0.038** in 10 s, speed 0.0023 | limit 0.01 — **misses** |
+
+Only the last hold case misses, and only because friction at 95% of its
+limit creeps when each step's impulses restart from zero. Per the closing-out
+rule that one test (`just_below_threshold_holds`) is `#[ignore]`d with its
+bound unchanged, and is un-ignored once warm-starting lands.
+
+Solver invariant note: the tangent solve runs before the normal solve in each
+contact visit, so a later normal update can lower `j_acc` slightly after `jt`
+was clamped against the earlier value. The clamp is exact when applied; the
+final `|jt|` can exceed `μ·j` by a fraction of a percent (0.04% observed) and
+the residual shrinks as iterations converge. The unit test allows 1% slack.
+The normal-then-tangent order (the A/B in the tuning tasks) would make the
+final state exact instead.
+
+### T019 — `ramp` demo
+
+`cargo build --examples --release` is clean; `ramp.exe` launches and runs
+without panicking (5 s timeout). The two-ramp scene is the same geometry the
+headless tests use (15° holds, 35° slides). Watching it for ~15 s is left to
+the user.

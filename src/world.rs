@@ -57,13 +57,15 @@ impl World {
     ///
     /// 1. `v += g * dt` for every dynamic body (`F = 0`);
     /// 2. broadphase + narrowphase to find contacts;
-    /// 3. the impulse solver: velocity iterations, then positional
-    ///    correction (see `solver`);
+    /// 3. the impulse solver: velocity iterations — at every contact a
+    ///    tangent (friction) impulse clamped to `±μ·j`, then the normal
+    ///    impulse — followed by positional correction (see `solver`);
     /// 4. `x += v * dt` and `θ += ω * dt` — semi-implicit Euler, so
     ///    position uses the final post-impulse velocity.
     ///
-    /// Static bodies are never touched. There is no friction yet (M4);
-    /// impulses act only along contact normals.
+    /// Static bodies are never touched. `μ` for a contact is
+    /// `√(friction_a · friction_b)`, so a body with `friction == 0.0` is
+    /// frictionless.
     pub fn step(&mut self, dt_real: f32) {
         self.accumulator += dt_real;
 

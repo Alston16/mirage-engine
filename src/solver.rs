@@ -20,6 +20,15 @@ pub(crate) const CORRECTION_PERCENT: f32 = 0.4;
 /// Approach speed below which a contact doesn't bounce (float-noise floor).
 const MIN_BOUNCE_SPEED: f32 = 1e-4;
 
+/// Pair friction `μ` from the two bodies' coefficients: `√(μ_a · μ_b)`.
+///
+/// Symmetric, so body order never matters. Deliberately not `max` (the rule
+/// used for restitution): a `μ = 0` body must stay frictionless whatever it
+/// touches, and `max` would let a rough floor grip it.
+pub(crate) fn combine_friction(a: f32, b: f32) -> f32 {
+    (a * b).sqrt()
+}
+
 /// Per-contact-point solver state, built once per step and discarded.
 struct ContactState {
     a: usize,
@@ -30,10 +39,19 @@ struct ContactState {
     r_b: Vec2,
     /// `K = 1/m_a + 1/m_b + (r_a×n)²/I_a + (r_b×n)²/I_b`.
     k: f32,
+    /// Tangent, `n` rotated 90°: `(−n_y, n_x)`.
+    t: Vec2,
+    /// `K_t = 1/m_a + 1/m_b + (r_a×t)²/I_a + (r_b×t)²/I_b`.
+    k_t: f32,
+    /// Combined friction `μ` of the pair.
+    mu: f32,
     /// Target normal velocity `−e·(vr·n)₀`, or `0` for a resting contact.
     bounce: f32,
     /// Accumulated normal impulse; invariant `j_acc >= 0`.
     j_acc: f32,
+    /// Accumulated tangent impulse; invariant `|jt_acc| <= μ · j_acc` after
+    /// each tangent solve.
+    jt_acc: f32,
     penetration: f32,
     /// `1 / points in the source manifold`.
     share: f32,
@@ -68,6 +86,14 @@ fn build_contacts(
             if k == 0.0 {
                 continue;
             }
+            let t = n.perp();
+            let ra_x_t = r_a.cross(t);
+            let rb_x_t = r_b.cross(t);
+            let k_t = body_a.inv_mass
+                + body_b.inv_mass
+                + ra_x_t * ra_x_t * body_a.inv_inertia
+                + rb_x_t * rb_x_t * body_b.inv_inertia;
+            let mu = combine_friction(body_a.friction, body_b.friction);
 
             // Target normal velocity −e·(vr·n)₀, so (1 + e) is applied once,
             // not re-applied every iteration. (vr·n)₀ is the approach velocity
@@ -88,11 +114,15 @@ fn build_contacts(
                 a,
                 b,
                 n,
+                t,
                 r_a,
                 r_b,
                 k,
+                k_t,
+                mu,
                 bounce,
                 j_acc: 0.0,
+                jt_acc: 0.0,
                 penetration: point.penetration,
                 share,
             });
@@ -101,24 +131,55 @@ fn build_contacts(
     contacts
 }
 
-/// Resolves every contact in `manifolds`: velocity iterations, then
-/// positional correction. Position integration stays in `World::step`.
-pub(crate) fn resolve(
+/// Applies impulse `p` at the contact: `−p` to body `a`, `+p` to body `b`,
+/// leaving static bodies untouched.
+fn apply_impulse(bodies: &mut [RigidBody], c: &ContactState, p: Vec2) {
+    let body_a = &mut bodies[c.a];
+    if !body_a.is_static {
+        body_a.velocity -= p * body_a.inv_mass;
+        body_a.angular_velocity -= c.r_a.cross(p) * body_a.inv_inertia;
+    }
+    let body_b = &mut bodies[c.b];
+    if !body_b.is_static {
+        body_b.velocity += p * body_b.inv_mass;
+        body_b.angular_velocity += c.r_b.cross(p) * body_b.inv_inertia;
+    }
+}
+
+/// `vr = (v_b + ω_b × r_b) − (v_a + ω_a × r_a)` at the contact.
+fn relative_velocity(bodies: &[RigidBody], c: &ContactState) -> Vec2 {
+    let (v_a, w_a) = (bodies[c.a].velocity, bodies[c.a].angular_velocity);
+    let (v_b, w_b) = (bodies[c.b].velocity, bodies[c.b].angular_velocity);
+    (v_b + Vec2::cross_sv(w_b, c.r_b)) - (v_a + Vec2::cross_sv(w_a, c.r_a))
+}
+
+/// Builds the contact state and runs the velocity iterations, returning the
+/// final per-point state (accumulated impulses included).
+fn solve(
     bodies: &mut [RigidBody],
     manifolds: &[Manifold],
     gravity: Vec2,
     dt: f32,
-) {
+) -> Vec<ContactState> {
     let mut contacts = build_contacts(bodies, manifolds, gravity, dt);
 
     for _ in 0..VELOCITY_ITERATIONS {
         for c in &mut contacts {
-            let (v_a, w_a) = (bodies[c.a].velocity, bodies[c.a].angular_velocity);
-            let (v_b, w_b) = (bodies[c.b].velocity, bodies[c.b].angular_velocity);
+            // Friction first, so the non-penetration constraint below has
+            // the last word each visit.
+            //
+            // vt = vr · t ;  Δjt = −vt / K_t ;  the *accumulated* jt is
+            // clamped to ±μ·j, with j the contact's accumulated normal
+            // impulse, so friction capacity grows as load builds up.
+            let vt = relative_velocity(bodies, c).dot(c.t);
+            let djt = -vt / c.k_t;
+            let max_jt = c.mu * c.j_acc;
+            let jt_new = (c.jt_acc + djt).clamp(-max_jt, max_jt);
+            let jt = jt_new - c.jt_acc;
+            c.jt_acc = jt_new;
+            apply_impulse(bodies, c, c.t * jt);
 
-            // vr = (v_b + ω_b × r_b) − (v_a + ω_a × r_a)
-            let vr = (v_b + Vec2::cross_sv(w_b, c.r_b)) - (v_a + Vec2::cross_sv(w_a, c.r_a));
-            let vn = vr.dot(c.n);
+            let vn = relative_velocity(bodies, c).dot(c.n);
 
             // Iterated form of j = −(1 + e)(vr·n) / K: drive vr·n toward the
             // target `bounce`, clamping the *accumulated* impulse to >= 0 so
@@ -127,21 +188,22 @@ pub(crate) fn resolve(
             let j_new = (c.j_acc + dj).max(0.0);
             let j = j_new - c.j_acc;
             c.j_acc = j_new;
-
-            let impulse = c.n * j;
-            let body_a = &mut bodies[c.a];
-            if !body_a.is_static {
-                body_a.velocity -= impulse * body_a.inv_mass;
-                body_a.angular_velocity -= c.r_a.cross(impulse) * body_a.inv_inertia;
-            }
-            let body_b = &mut bodies[c.b];
-            if !body_b.is_static {
-                body_b.velocity += impulse * body_b.inv_mass;
-                body_b.angular_velocity += c.r_b.cross(impulse) * body_b.inv_inertia;
-            }
+            apply_impulse(bodies, c, c.n * j);
         }
     }
+    contacts
+}
 
+/// Resolves every contact in `manifolds`: velocity iterations (friction and
+/// normal), then positional correction. Position integration stays in
+/// `World::step`.
+pub(crate) fn resolve(
+    bodies: &mut [RigidBody],
+    manifolds: &[Manifold],
+    gravity: Vec2,
+    dt: f32,
+) {
+    let contacts = solve(bodies, manifolds, gravity, dt);
     correct_positions(bodies, &contacts);
 }
 
@@ -223,6 +285,87 @@ mod tests {
 
     fn ball(y: f32) -> RigidBody {
         RigidBody::new_dynamic(Vec2::new(0.0, y), 1.0, Shape::circle(1.0))
+    }
+
+    #[test]
+    fn combine_friction_is_symmetric_zero_absorbing_and_idempotent() {
+        assert_eq!(combine_friction(0.3, 0.8), combine_friction(0.8, 0.3));
+        assert_eq!(combine_friction(0.0, 0.9), 0.0);
+        assert_eq!(combine_friction(0.9, 0.0), 0.0);
+        for x in [0.1_f32, 0.5, 1.0, 2.5] {
+            assert!((combine_friction(x, x) - x).abs() < 1e-6, "combine({x}, {x})");
+        }
+    }
+
+    /// A box (mass 1, half-extent 1) overlapping the floor by `0.01`, moving
+    /// at `vx` with this step's gravity kick already applied, as
+    /// `World::step` would hand it to the solver.
+    fn sliding_box(vx: f32) -> Vec<RigidBody> {
+        let mut body = RigidBody::new_dynamic(Vec2::new(0.0, 0.99), 1.0, square());
+        body.velocity = Vec2::new(vx, -9.81 * FIXED_DT);
+        vec![floor(), body]
+    }
+
+    #[test]
+    fn friction_decelerates_by_mu_g_dt() {
+        // Default μ_pair = 0.5; the normal impulse holding the box up is
+        // m·g·dt, so the Coulomb limit on the tangent impulse is μ·m·g·dt.
+        let mut bodies = sliding_box(2.0);
+        let manifolds = detect_contacts(&bodies);
+        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        let lost = 2.0 - bodies[1].velocity.x;
+        let expected = 0.5 * 9.81 * FIXED_DT;
+        assert!(
+            (lost - expected).abs() / expected < 0.05,
+            "lost {lost}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn zero_friction_leaves_tangential_velocity_alone() {
+        let mut bodies = sliding_box(2.0);
+        bodies[1] = bodies[1].clone().with_friction(0.0);
+        let manifolds = detect_contacts(&bodies);
+        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        assert_eq!(bodies[1].velocity.x, 2.0);
+    }
+
+    #[test]
+    fn friction_never_exceeds_coulomb_limit() {
+        // A slightly tilted box (two bottom corners nearly level) sliding
+        // and spinning: every contact must end within |jt| <= μ·j, j >= 0.
+        let mut bodies = sliding_box(3.0);
+        bodies[1].orientation = Rot2::new(0.05);
+        bodies[1].position.y = 1.03;
+        bodies[1].angular_velocity = 1.5;
+        let manifolds = detect_contacts(&bodies);
+        assert!(!manifolds.is_empty(), "scene must produce contacts");
+        let contacts = solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        assert!(!contacts.is_empty());
+        for c in &contacts {
+            assert!(c.j_acc >= 0.0, "pulling contact: j = {}", c.j_acc);
+            // The clamp is exact when the tangent impulse is applied; the
+            // normal solve that follows in the same visit may then lower
+            // `j_acc` a hair, so the final state can sit a fraction of a
+            // percent over (0.04% here) — 1% slack bounds that ordering
+            // effect without hiding a real overshoot.
+            assert!(
+                c.jt_acc.abs() <= c.mu * c.j_acc * 1.01 + 1e-6,
+                "|jt| = {} exceeds μ·j = {}",
+                c.jt_acc.abs(),
+                c.mu * c.j_acc
+            );
+        }
+        assert!(contacts.iter().any(|c| c.jt_acc != 0.0), "friction never engaged");
+    }
+
+    #[test]
+    fn friction_never_moves_a_static_body() {
+        let mut bodies = sliding_box(2.0);
+        let floor_before = bodies[0].clone();
+        let manifolds = detect_contacts(&bodies);
+        solve(&mut bodies, &manifolds, Vec2::new(0.0, -9.81), FIXED_DT);
+        assert_eq!(bodies[0], floor_before);
     }
 
     #[test]
