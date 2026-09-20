@@ -80,8 +80,9 @@ fn run_tower(n: usize, seconds: f32) -> TowerRun {
         if tilt > 0.05 {
             note(&mut out, format!("t={t:.2}: tilt {tilt:.4} rad > 0.05"));
         }
-        if s > SINK_ALWAYS_MAX {
-            note(&mut out, format!("t={t:.2}: sink {s:.4} > {SINK_ALWAYS_MAX}"));
+        let sink_limit = if t < SINK_STARTUP_SECONDS { SINK_STARTUP_MAX } else { SINK_MAX };
+        if s > sink_limit {
+            note(&mut out, format!("t={t:.2}: sink {s:.4} > {sink_limit}"));
         }
         if t >= SINK_SETTLE_SECONDS {
             if s > SINK_SETTLED_MAX {
@@ -272,4 +273,30 @@ fn tower_is_bit_identical_across_runs() {
     for &id in &ids {
         assert_eq!(w1.body(id), w2.body(id), "body {id:?} diverged between runs");
     }
+}
+
+/// Constitution II: rendering framerate must not matter. The demos call
+/// `step(get_frame_time())` with whatever the display gives them; a tower
+/// driven by a mix of 144, 75 and 30 Hz frames for 60 s must end as settled
+/// as the fixed-step run.
+#[test]
+fn tower_is_stable_under_variable_frame_times() {
+    let mut world = World::new();
+    let ids = tower(&mut world, 10);
+    let top = *ids.last().unwrap();
+    let frames = [1.0 / 144.0, 1.0 / 75.0, 1.0 / 30.0, 1.0 / 144.0, 1.0 / 60.0];
+    let mut t = 0.0_f32;
+    let mut i = 0;
+    while t < 60.0 {
+        let dt = frames[i % frames.len()];
+        world.step(dt);
+        t += dt;
+        i += 1;
+        assert!(all_finite(&world, &ids), "non-finite state at t = {t}");
+    }
+    let (s, drift, sp) = (sink(&world, top, 9.5), max_drift(&world, &ids, 0.0), max_speed(&world, &ids));
+    report("tower10 mixed frames", t, s, drift, sp);
+    assert!(drift <= DRIFT_MAX, "drift {drift}");
+    assert!(s <= SINK_SETTLED_MAX, "sink {s}");
+    assert!(sp <= SPEED_MAX, "speed {sp}");
 }

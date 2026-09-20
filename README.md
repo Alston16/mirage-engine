@@ -12,12 +12,16 @@ to finish and understand *why* a box falls, hits the ground, and stops.
 
 ## Status
 
-Pre-MVP. M0–M3 have landed: math, bodies and the fixed-timestep integrator,
-collision detection, and normal-impulse resolution with restitution
-(`cargo run --example bouncing --release`). Friction and stable stacking
-(M4) are next, so boxes on a ramp still slide and towers don't hold yet. The
-milestones below (§ MVP milestones) are the source of truth for progress;
-this section gets updated as they land.
+Pre-MVP, one confirmation away. M0–M3 have landed: math, bodies and the
+fixed-timestep integrator, collision detection, and normal-impulse resolution
+with restitution (`cargo run --example bouncing --release`). M4 is implemented
+and verified headlessly: Coulomb friction, warm-started stacking, a 10-box
+tower that stands for 60 s, a 5-row pyramid, and a box that holds on a
+shallow ramp and slides on a steep one (`cargo test`). The M4 checkbox below
+stays open until `stack`, `ramp` and `pyramid` have been watched with
+`--release`, per the milestone's "done when". The milestones below (§ MVP
+milestones) are the source of truth for progress; this section gets updated
+as they land.
 
 ## Design principles
 
@@ -47,9 +51,16 @@ mirage-engine/
 │   │   ├── circle.rs    # circle–circle, circle–polygon
 │   │   ├── polygon.rs   # SAT axis test, reference/incident face
 │   │   └── manifold.rs  # Contact, Manifold, face clipping
-│   └── solver.rs        # sequential impulses: normal, restitution, friction
+│   └── solver.rs        # sequential impulses: normal, restitution, friction,
+│                        #   warm-starting
+├── tests/               # behavioral scenes on the public API
+│   ├── common/mod.rs    #   scene builders, metrics, acceptance bounds
+│   ├── friction.rs      #   ramps: hold/slide, Coulomb acceleration, rolling disc
+│   └── stacking.rs      #   10-box tower, pyramid, mixed shapes, determinism
 └── examples/
+    ├── common/mod.rs    # shared drawing helpers for stack and pyramid
     ├── bouncing.rs      # circles falling onto a static floor
+    ├── ramp.rs          # shallow ramp holds, steep ramp slides
     ├── stack.rs         # 10-box tower — the MVP acceptance demo
     └── pyramid.rs       # stress case
 ```

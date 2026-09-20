@@ -43,7 +43,8 @@ Fields added by M4 are marked ◆.
 | ◆ `mu` | Combined `μ` for the pair |
 | `bounce` | Target normal velocity `−e·(vr·n)₀`, computed **before** cache seeding |
 | `j_acc` | Accumulated normal impulse; invariant `j_acc ≥ 0`. ◆ Seeded from the cache. |
-| ◆ `jt_acc` | Accumulated tangent impulse; invariant `|jt_acc| ≤ mu · j_acc` after each solve. Seeded from the cache. |
+| ◆ `jt_acc` | Accumulated tangent impulse; clamped to `|jt_acc| ≤ mu · j_acc` when applied. Because the normal solve follows in the same visit, the final value can exceed that by a fraction of a percent (0.04% observed). Seeded from the cache. |
+| ◆ `j_seed`, `jt_seed` | The impulses the contact was seeded with (`0` if new); read only by tests |
 | ◆ `feature` | Copied from the `Contact`; cache key part |
 | `penetration`, `share` | Unchanged |
 
@@ -65,10 +66,10 @@ cache: Vec<CachedImpulse>      // order = manifold order × point order of the l
 
 ## Constants (`src/solver.rs`)
 
-| Name | M3 | M4 starting value | Purpose |
+| Name | M3 | M4 final | Purpose |
 |---|---|---|---|
-| `VELOCITY_ITERATIONS` | `8` | `12` (tuned; see research.md) | Solver passes per step |
-| `PENETRATION_SLOP` | `0.01` | `0.002`–`0.005` (tuned) | Penetration tolerated before correction; sets steady-state stack compression |
+| `VELOCITY_ITERATIONS` | `8` | **`16`** (tuned; research.md § Tuning results) | Solver passes per step |
+| `PENETRATION_SLOP` | `0.01` | **`0.002`** (tuned) | Penetration tolerated before correction; sets steady-state stack compression |
 | `CORRECTION_PERCENT` | `0.4` | `0.4` | Fraction of excess penetration removed per step |
 | `MIN_BOUNCE_SPEED` | `1e-4` | `1e-4` | Float-noise floor for restitution |
 

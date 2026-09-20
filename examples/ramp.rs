@@ -98,7 +98,7 @@ async fn main() {
         }
 
         draw_text(
-            &format!("left: {:.0}\u{b0} ramp   right: {:.0}\u{b0} ramp   \u{3bc} = {mu}   atan \u{3bc} = {:.1}\u{b0}", shallow.to_degrees(), steep.to_degrees(), mu.atan().to_degrees()),
+            format!("left: {:.0}\u{b0} ramp   right: {:.0}\u{b0} ramp   \u{3bc} = {mu}   atan \u{3bc} = {:.1}\u{b0}", shallow.to_degrees(), steep.to_degrees(), mu.atan().to_degrees()),
             12.0,
             24.0,
             22.0,

@@ -4,11 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Pre-MVP: no `Cargo.toml` or `src/` exist yet. `README.md` is the authoritative
-spec — it defines the architecture, the math each module must implement, and
-the milestone order (M0–M4) that development follows. Read `README.md` in
-full before writing code here; this file only adds what the README doesn't
-already say.
+Pre-MVP: the `mirage` crate exists and milestones M0–M4 are implemented
+(math, bodies and integrator, collision, impulse resolution, friction and
+warm-started stacking); the M4 checkbox in `README.md` stays open until the
+`stack`, `pyramid` and `ramp` demos have been watched with `--release`.
+`README.md` is the authoritative spec — it defines the architecture, the math
+each module must implement, and the milestone order (M0–M4) that development
+follows. Read `README.md` in full before writing code here; this file only
+adds what the README doesn't already say.
 
 ## What this project is
 
@@ -20,15 +23,14 @@ permitted only as a `dev-dependency` for the `examples/` demos.
 
 ## Commands
 
-Not yet runnable — no crate exists. Once scaffolded (M0), the standard
-workflow will be:
-
 ```
-cargo test                            # unit tests (math, collision, solver)
+cargo test                            # unit tests + tests/ behavioral scenes
 cargo test <test_name>                # run a single test
+cargo test --release --test stacking -- --nocapture   # tower/pyramid metrics
 cargo run --example stack --release   # MVP acceptance demo: 10-box tower
 cargo run --example bouncing --release
 cargo run --example pyramid --release
+cargo run --example ramp --release    # shallow box holds, steep box slides
 ```
 
 `--release` is not optional for the examples — debug builds of the solver
@@ -50,9 +52,11 @@ Single lib crate, no workspace split. Module responsibilities (see
 Data flow per `World::step`: gravity is added to velocity → broadphase
 produces candidate pairs → narrowphase produces `Contact`/`Manifold` (point,
 normal, penetration; normal always points from `body_a` to `body_b`) → solver
-iterates impulses over manifolds (~8 velocity iterations), then applies
-positional correction → integrator applies the resulting velocities to
-position and orientation (semi-implicit Euler).
+iterates impulses over manifolds (16 velocity iterations; each contact
+visit applies a friction impulse clamped to `±μ·j`, then the normal impulse,
+starting from the previous step's impulses for persistent contacts), then
+applies positional correction → integrator applies the resulting velocities
+to position and orientation (semi-implicit Euler).
 
 The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 `mirage` itself only ever produces geometry and body state.

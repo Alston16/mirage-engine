@@ -72,8 +72,8 @@ The spec's original numbers (top box ≤ 2% low for the whole 60 s; speed
 (top boxes fall onto boxes already stopped below; unavoidable with no contact
 margin) and needed ~22 s to get under 0.01.
 
-Resolution (spec.md § Clarifications, 2026-09-20): compression ≤ 10% at all
-times, ≤ 3% from 10 s, creep ≤ 0.1% between 10 s and 60 s; speed < 0.1 m/s
+Resolution (spec.md § Clarifications, 2026-09-20): compression ≤ 10% from
+1 s (originally "at all times" — see § Start-up transient below), ≤ 3% from 10 s, creep ≤ 0.1% between 10 s and 60 s; speed < 0.1 m/s
 from 2 s and < 0.01 m/s from 30 s. Each bound has margin against the
 prototype (6.7% / 2.4% / 0.0% creep; last speed > 0.01 at 22 s), and 0.1 m/s
 is about 4 px/s at the demo scale — not visible as motion.
@@ -350,7 +350,11 @@ spawn, not of the solver's tuning. It would only shrink with something
 outside M4's stated levers (contacts that exist *before* penetration —
 speculative margin — or a pre-settled spawn). SC-001 as amended ("≤ 10% at
 all times") therefore cannot hold in its first ~0.5 s. Per the Stop rule this
-is taken to `/speckit-clarify` rather than loosened in the test.
+was taken to `/speckit-clarify` rather than loosened in the test. **Decision
+(user, 2026-09-20): amend SC-001** with a start-up window — ≤ 20% before 1 s
+(measured peak 0.150), ≤ 10% from 1 s (0.085 measured), ≤ 3% from 10 s,
+creep ≤ 0.1%. Alternatives declined: a contact margin (beyond M4's levers)
+and a pre-settled spawn (contradicts "just touching").
 
 ### Step order A/B (T037), it = 16, slop 0.002
 
@@ -373,3 +377,32 @@ case, and normal-first loses it. (Normal-first would make the final
   "Soft under load", as the README says, not unstable.
 - 1000:1 stack: finite and bounded, but the light box is squeezed out and the
   heavy box ends on the floor (y = 0.494). Stable, not stacked.
+
+### Implementation close-out (2026-09-20)
+
+- **Amendment applied**: SC-001 start-up window (≤ 20% before 1 s, ≤ 10% from
+  1 s) — see § Start-up transient. At the chosen constants (16 iterations,
+  slop 0.002) `tower_stands_for_sixty_seconds` has zero violations: peak
+  0.150 (t = 0.17 s), 0.085 at 1 s, 0.024 at 10 s, 0.018 at 60 s, drift 0.022,
+  tilt 0.004, speed ≤ 0.01 from 15.1 s.
+- **Frame-time independence**: with a mix of 144/75/30/60 Hz frames for 60 s
+  the tower ends at sink 0.018, drift 0.008, speed 0
+  (`tower_is_stable_under_variable_frame_times`).
+- **Determinism**: two 60 s tower runs are bit-identical.
+- **Suite**: 97 tests pass in debug and release (83 unit, 7 friction, 7
+  stacking).
+- **M3 regression review (T045)**: every line removed from `src/` since
+  `30318b7` is production refactoring or a mechanical test edit; no M3
+  assertion or tolerance changed.
+- **Constitution checks (T049)**: zero dependencies, no `unsafe`, no
+  `HashMap`/`thread_local`, no rendering code in `src/`, no non-goal
+  machinery.
+- **Clippy**: three warnings remain, all in M1–M3 code this milestone did not
+  touch (`broadphase.rs:15`, `collision/mod.rs:51`, `examples/bouncing.rs:88`);
+  the one in `ramp.rs` was fixed.
+- **Not verified by a person watching**: `ramp`, `stack`, `pyramid` and
+  `bouncing` all build cleanly and launch without panicking, and every
+  behavior they show is covered by a passing headless test, but the
+  Constitution IV "watch it with `--release`" check is left to the user.
+  Until then the README's M4 checkbox and "MVP is complete" line are not
+  applied.

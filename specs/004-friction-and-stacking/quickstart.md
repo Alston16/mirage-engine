@@ -30,7 +30,7 @@ Expect passing tests covering, at minimum:
 | Solid disc on a ramp rolls: `a = (2/3) g sin θ` within 5% | US1-5 |
 | `combine_friction(a, b) == combine_friction(b, a)`; `0` if either is `0` | FR-002 |
 | Accumulated `|jt| ≤ μ·j` and `j ≥ 0` after every solve | FR-001, FR-005 |
-| 10-box tower, 60 s: drift ≤ 5%; sink ≤ 10% always, ≤ 3% from 10 s, creep ≤ 0.1%; speed < 0.1 from 2 s and < 0.01 from 30 s; does not topple | US2-1..3, SC-001, SC-002 |
+| 10-box tower, 60 s: drift ≤ 5%; sink ≤ 20% before 1 s, ≤ 10% from 1 s, ≤ 3% from 10 s, creep ≤ 0.1%; speed < 0.1 from 2 s and < 0.01 from 30 s; does not topple | US2-1..3, SC-001, SC-002 |
 | Tower, same scene twice: bit-identical state | US2-5, SC-007, FR-013 |
 | Pyramid (5 rows), 30 s: drift ≤ 0.1, sink ≤ 0.1, tilt ≤ 0.05 rad, speed ≤ 0.05 after 10 s | US3-1, SC-005 |
 | 15-box tower: values stay finite, speed stays bounded (may be soft, must not explode) | Edge cases |

@@ -13,8 +13,12 @@ pub const G: f32 = 9.81;
 
 /// SC-001: horizontal drift of any tower box, in box widths.
 pub const DRIFT_MAX: f32 = 0.05;
-/// SC-001: top-box compression bound at all times, in box heights.
-pub const SINK_ALWAYS_MAX: f32 = 0.10;
+/// SC-001: seconds of start-up transient, while contacts are first detected.
+pub const SINK_STARTUP_SECONDS: f32 = 1.0;
+/// SC-001: top-box compression bound during start-up, in box heights.
+pub const SINK_STARTUP_MAX: f32 = 0.20;
+/// SC-001: top-box compression bound from `SINK_STARTUP_SECONDS` on.
+pub const SINK_MAX: f32 = 0.10;
 /// SC-001: top-box compression bound once settled, in box heights.
 pub const SINK_SETTLED_MAX: f32 = 0.03;
 /// SC-001: seconds after which `SINK_SETTLED_MAX` applies.

@@ -30,8 +30,10 @@ tighter than this solver class delivers while the tower settles from its "just
 touching" spawn (at slop 0.002 the top box is 6.7% low at t = 2 s, 2.4% at
 10 s, 1.8% at 60 s; combined linear/angular speed last exceeds 0.01 at
 ~22 s). Those criteria were re-based on the measured data in the spec's
-2026-09-20 Clarifications (10% always, 3% from 10 s, no creep; speed < 0.1
-from 2 s and < 0.01 from 30 s). If the tuning tasks still miss the re-based
+2026-09-20 Clarifications (≤ 10% from 1 s, 3% from 10 s, no creep; speed < 0.1
+from 2 s and < 0.01 from 30 s), and amended again once the real solver
+showed a start-up transient (≤ 20% before 1 s; see research.md § Start-up
+transient). If the tuning tasks still miss the re-based
 bounds, the fix is another data-backed spec amendment, not a silent
 threshold change. See research.md § Spec-threshold risk.
 
@@ -177,9 +179,10 @@ steps 1, 2, 7, 8 live in `World::step`. Changes from M3 are marked ◆.
 ```
 
 The tangent-then-normal order lets the normal constraint have the final say
-each iteration. The prototype only compared the two orders *without*
-warm-starting (both collapsed the tower), so the order is a starting choice
-with an A/B task under warm-starting; the result is recorded in research.md.
+each iteration. The A/B under warm-starting (research.md § Step order A/B)
+kept it: normal-then-tangent settles the tower slightly faster but fails the
+1000:1 mass-ratio case. Final constants: 16 iterations, slop 0.002,
+`CORRECTION_PERCENT` 0.4.
 
 ## Complexity Tracking
 
