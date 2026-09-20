@@ -4,10 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Pre-MVP: the `mirage` crate exists and milestones M0–M4 are implemented
+MVP complete: the `mirage` crate exists and milestones M0–M4 have landed
 (math, bodies and integrator, collision, impulse resolution, friction and
-warm-started stacking); the M4 checkbox in `README.md` stays open until the
-`stack`, `pyramid` and `ramp` demos have been watched with `--release`.
+warm-started stacking), with all four demos watched with `--release`.
 `README.md` is the authoritative spec — it defines the architecture, the math
 each module must implement, and the milestone order (M0–M4) that development
 follows. Read `README.md` in full before writing code here; this file only

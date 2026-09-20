@@ -406,3 +406,10 @@ case, and normal-first loses it. (Normal-first would make the final
   Constitution IV "watch it with `--release`" check is left to the user.
   Until then the README's M4 checkbox and "MVP is complete" line are not
   applied.
+
+### Visual confirmation (2026-09-20)
+
+The user watched `ramp`, `stack`, `pyramid` and `bouncing` with `--release`
+and reported they look good. That closes T019, T041, T043 and T046, and the
+Constitution IV check for M4's "done when". The README's M4 checkbox and
+"MVP complete" status are now applied.

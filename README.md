@@ -12,16 +12,16 @@ to finish and understand *why* a box falls, hits the ground, and stops.
 
 ## Status
 
-Pre-MVP, one confirmation away. M0–M3 have landed: math, bodies and the
-fixed-timestep integrator, collision detection, and normal-impulse resolution
-with restitution (`cargo run --example bouncing --release`). M4 is implemented
-and verified headlessly: Coulomb friction, warm-started stacking, a 10-box
-tower that stands for 60 s, a 5-row pyramid, and a box that holds on a
-shallow ramp and slides on a steep one (`cargo test`). The M4 checkbox below
-stays open until `stack`, `ramp` and `pyramid` have been watched with
-`--release`, per the milestone's "done when". The milestones below (§ MVP
-milestones) are the source of truth for progress; this section gets updated
-as they land.
+MVP complete. M0–M4 have landed: math, bodies and the fixed-timestep
+integrator, collision detection, normal-impulse resolution with restitution
+(`cargo run --example bouncing --release`), and Coulomb friction with
+warm-started stacking. A 10-box tower stands for 60 s
+(`cargo run --example stack --release`), a 5-row pyramid stays put
+(`cargo run --example pyramid --release`), and a box holds on a shallow ramp
+while one on a steep ramp slides (`cargo run --example ramp --release`); all
+four demos were watched with `--release`, and the same behaviors are covered
+by `cargo test`. The milestones below (§ MVP milestones) are the source of
+truth for progress.
 
 ## Design principles
 
@@ -205,7 +205,7 @@ load. That's expected behavior for this class of solver, not a bug to chase.
       positional correction.
       *Done when:* a ball dropped with `e = 1.0` returns to within a few
       percent of its drop height, and with `e = 0` it stops dead.
-- [ ] **M4 — Friction & stacking.** Tangent impulses, iteration count
+- [x] **M4 — Friction & stacking.** Tangent impulses, iteration count
       tuning, warm-starting if needed.
       *Done when:* `examples/stack.rs` holds a 10-box tower stable for 60
       seconds without visible jitter or sinking, and a box on a shallow ramp
