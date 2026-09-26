@@ -12,6 +12,9 @@ use crate::{broadphase, BodyId, RigidBody, Shape};
 /// `Manifold` for every pair currently touching. Pure function — no
 /// mutation of `bodies`.
 ///
+/// `Contact.feature` identifies the geometry that produced each point and is
+/// preserved when a normal is negated.
+///
 /// Normal-direction convention: for every shape pair, in either order,
 /// `Contact.normal` points from the pair's first body (`body_a`) toward its
 /// second (`body_b`) — the direction the solver pushes `body_b` along.
@@ -133,5 +136,22 @@ mod tests {
             square(Vec2::new(0.2, 1.8), rotated),
             square(Vec2::new(0.0, 0.0), Rot2::IDENTITY),
         ]);
+    }
+
+    #[test]
+    fn circle_then_polygon_negation_keeps_feature() {
+        // (Circle, Polygon) flips the normal; the feature must survive, and
+        // match what the (Polygon, Circle) ordering reports for the same pair.
+        let a = detect_contacts(&[
+            circle(Vec2::new(0.0, 1.8)),
+            square(Vec2::new(0.0, 0.0), Rot2::IDENTITY),
+        ]);
+        let b = detect_contacts(&[
+            square(Vec2::new(0.0, 0.0), Rot2::IDENTITY),
+            circle(Vec2::new(0.0, 1.8)),
+        ]);
+        assert_eq!(a[0].points[0].feature, 0);
+        assert_eq!(a[0].points[0].feature, b[0].points[0].feature);
+        assert!(a[0].points[0].normal.dot(b[0].points[0].normal) < 0.0, "normals should be opposite");
     }
 }
