@@ -88,7 +88,7 @@ impl Shape {
             let q = vertices[(i + 1) % vertices.len()];
             let c = p.cross(q);
             cross_sum += c;
-            weighted = weighted + (p + q) * c;
+            weighted += (p + q) * c;
         }
         weighted / (3.0 * cross_sum)
     }
