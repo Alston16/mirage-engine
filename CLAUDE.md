@@ -84,5 +84,5 @@ The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/005-shape-com-and-stability-hardening/plan.md`.
+at `specs/006-revolute-hinge-joint/plan.md`.
 <!-- SPECKIT END -->
