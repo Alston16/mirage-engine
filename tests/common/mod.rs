@@ -111,6 +111,23 @@ pub fn tower(world: &mut World, n: usize) -> Vec<BodyId> {
         .collect()
 }
 
+/// Same layout as `tower`, but with `μ = 0` on both the floor and every box
+/// — issue #11 / README's `μ = 0` known trade-off: a frictionless stack is
+/// only neutrally stable and collapses above roughly three boxes. `tower`
+/// itself is untouched; every other stacking test keeps using its default
+/// `μ = 0.5`.
+pub fn frictionless_tower(world: &mut World, n: usize) -> Vec<BodyId> {
+    world.add_body(floor(0.0));
+    (0..n)
+        .map(|i| {
+            world.add_body(
+                RigidBody::new_dynamic(Vec2::new(0.0, 0.5 + i as f32), 1.0, unit_box())
+                    .with_friction(0.0),
+            )
+        })
+        .collect()
+}
+
 /// Adds the floor and a pyramid: row `r` (from the bottom) holds
 /// `rows − r` unit boxes centered on `x = 0`, exactly touching.
 pub fn pyramid(world: &mut World, rows: usize) -> Vec<BodyId> {
