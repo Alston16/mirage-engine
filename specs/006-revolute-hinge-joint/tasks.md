@@ -31,14 +31,14 @@ Single crate, matching the existing repository layout — `src/`, `tests/`,
 **Purpose**: Scaffolding so later tasks have somewhere to land — no
 behavior yet.
 
-- [ ] T001 Add `pub mod joint;` to `src/lib.rs` and create `src/joint.rs`
+- [X] T001 Add `pub mod joint;` to `src/lib.rs` and create `src/joint.rs`
       with a module doc comment following the style of `src/solver.rs`'s
       header (`//! Sequential-impulse solver — README § Resolution.`),
       e.g. `//! Revolute (hinge) joint — a 2-body point constraint.`
-- [ ] T002 [P] Create `tests/joints.rs` with a module doc comment and a
+- [X] T002 [P] Create `tests/joints.rs` with a module doc comment and a
       `use mirage::{...}` import block, following the shape of
       `tests/friction.rs`'s header
-- [ ] T003 [P] Create `examples/hinge.rs` with a `#[macroquad::main("hinge")]
+- [X] T003 [P] Create `examples/hinge.rs` with a `#[macroquad::main("hinge")]
       async fn main()` stub (empty loop) following the top-level shape of
       `examples/bouncing.rs`
 
@@ -56,7 +56,7 @@ solver/world plumbing that lets a joint's impulse actually get applied.
 
 **⚠️ CRITICAL**: Complete this phase before starting any user story below.
 
-- [ ] T004 [P] Add `Mat2` to `src/math.rs`: fields `m11, m12, m21, m22: f32`;
+- [X] T004 [P] Add `Mat2` to `src/math.rs`: fields `m11, m12, m21, m22: f32`;
       `Mat2::new(m11, m12, m21, m22)`; `impl Mul<Vec2> for Mat2` (matrix ×
       vector); `Mat2::invert(&self) -> Mat2` via `1/det * adjugate`. Add
       unit tests in `src/math.rs`'s existing `#[cfg(test)] mod tests`
@@ -64,13 +64,13 @@ solver/world plumbing that lets a joint's impulse actually get applied.
       acting on a test vector), and a rotation-like matrix's product with
       a vector matches hand-computed values. (data-model.md § `Mat2`,
       research.md § 2)
-- [ ] T005 In `src/joint.rs`, define `pub struct RevoluteJoint { pub body_a:
+- [X] T005 In `src/joint.rs`, define `pub struct RevoluteJoint { pub body_a:
       BodyId, pub body_b: BodyId, pub anchor_a: Vec2, pub anchor_b: Vec2 }`
       and `impl RevoluteJoint { pub fn new(body_a: BodyId, body_b: BodyId,
       anchor_a: Vec2, anchor_b: Vec2) -> Self }`, and `pub struct
       JointId(pub(crate) u32);` — exact signatures from
       contracts/joint-api.md. *(depends on T001)*
-- [ ] T006 In `src/world.rs`, add `joints: Vec<RevoluteJoint>` to `World`,
+- [X] T006 In `src/world.rs`, add `joints: Vec<RevoluteJoint>` to `World`,
       initialize it in `World::new()`, and add `pub fn add_joint(&mut self,
       joint: RevoluteJoint) -> JointId` (panics if `body_a == body_b` or
       either `BodyId` is out of range for `self.bodies`) and `pub fn
@@ -79,10 +79,10 @@ solver/world plumbing that lets a joint's impulse actually get applied.
       `#[cfg(test)] mod tests`: `add_joint` returns a usable `JointId`,
       `joint()` returns what was stored, and a joint with `body_a ==
       body_b` panics. *(depends on T005)*
-- [ ] T007 [P] Add `pub use joint::{JointId, RevoluteJoint};` to
+- [X] T007 [P] Add `pub use joint::{JointId, RevoluteJoint};` to
       `src/lib.rs`, next to the existing `pub use body::{BodyId,
       RigidBody};` line. *(depends on T005)*
-- [ ] T008 Restructure `src/solver.rs`'s `pub(crate) fn resolve(...)` into
+- [X] T008 Restructure `src/solver.rs`'s `pub(crate) fn resolve(...)` into
       four `pub(crate)` phases with the same signatures its internals
       already imply: `build_contacts(bodies, manifolds, gravity, dt) ->
       Vec<ContactState>`, `warm_start(bodies, &mut Vec<ContactState>,
@@ -96,7 +96,7 @@ solver/world plumbing that lets a joint's impulse actually get applied.
       `src/solver.rs`'s `#[cfg(test)] mod tests` keeps passing unmodified.
       Do not change any formula, constant, or clamp — this is a pure
       structural split (research.md § 3).
-- [ ] T009 In `src/joint.rs`, implement the crate-internal `JointState`
+- [X] T009 In `src/joint.rs`, implement the crate-internal `JointState`
       (fields per data-model.md: `a, b: usize`, `r_a, r_b: Vec2`, `k,
       k_inv: Mat2`), `pub(crate) fn build_joints(bodies: &[RigidBody],
       joints: &[RevoluteJoint]) -> Vec<JointState>` (drop a joint whose
@@ -113,7 +113,7 @@ solver/world plumbing that lets a joint's impulse actually get applied.
       and `0.4`, matching `solver.rs`'s tuned contact constants as a
       starting point — see T022 for retuning if needed). *(depends on
       T004, T005, T006)*
-- [ ] T010 In `src/world.rs`'s `World::step`, replace the current
+- [X] T010 In `src/world.rs`'s `World::step`, replace the current
       `solver::resolve(&mut self.bodies, &manifolds, &mut
       self.impulse_cache, self.gravity, FIXED_DT);` call with the shared
       loop from research.md § 3: build contact and joint states, warm-start
@@ -150,30 +150,30 @@ gravity, and confirm the anchor points never drift apart beyond
 > exists but whose `iterate_once`/`correct_positions` have a bug, and pass
 > once Phase 2 is correct.
 
-- [ ] T011 [P] [US1] In `tests/joints.rs`, write
+- [X] T011 [P] [US1] In `tests/joints.rs`, write
       `anchor_stays_coincident_under_gravity`: a static pin body and a
       dynamic body joined by a `RevoluteJoint` with non-center anchors,
       stepped for a sustained run (e.g. 5 s of `World::step`), asserting
       `(world_anchor_a - world_anchor_b).length() <= JOINT_SLOP` (or a
       small tolerance atop it) at every step, not just at the end.
-- [ ] T012 [P] [US1] In `tests/joints.rs`, write
+- [X] T012 [P] [US1] In `tests/joints.rs`, write
       `static_body_in_a_joint_never_moves`: a joint between a static and a
       dynamic body; assert the static body's `position`/`velocity`/
       `angular_velocity` are unchanged after a sustained run, the same
       assertion style as `src/world.rs`'s `static_body_never_moves` test.
-- [ ] T013 [P] [US1] In `tests/joints.rs`, write
+- [X] T013 [P] [US1] In `tests/joints.rs`, write
       `jointed_body_also_resolves_contacts`: a dynamic body pinned by a
       joint to a fixed point *and* resting on/falling onto a floor (a
       contact), asserting both that the anchor stays coincident and that
       the body doesn't sink through the floor beyond the existing contact
       tolerance (`solver::PENETRATION_SLOP`) — this is spec.md User Story 1
       scenario 3.
-- [ ] T014 [P] [US1] In `tests/joints.rs`, write
+- [X] T014 [P] [US1] In `tests/joints.rs`, write
       `chain_of_joints_all_stay_coincident`: three bodies linked by two
       `RevoluteJoint`s (a short chain), run under gravity, and assert every
       joint's anchor pair stays coincident — spec.md's "more than one joint
       on a body" edge case.
-- [ ] T015 [P] [US1] In `tests/joints.rs`, write
+- [X] T015 [P] [US1] In `tests/joints.rs`, write
       `identical_joint_scenes_are_bit_identical`: build the same
       joint+body scene twice, run both for N steps, and assert every
       body's state is bit-identical between the two runs — mirrors
@@ -182,7 +182,7 @@ gravity, and confirm the anchor points never drift apart beyond
 
 ### Implementation for User Story 1
 
-- [ ] T016 [US1] Run `cargo test`, and fix any bug in `src/joint.rs`'s
+- [X] T016 [US1] Run `cargo test`, and fix any bug in `src/joint.rs`'s
       `build_joints`/`iterate_once`/`correct_positions` or `src/world.rs`'s
       wiring (from Phase 2) that T011–T015 surface, until every test in
       `tests/joints.rs` and every existing test in `src/solver.rs` /
@@ -203,7 +203,7 @@ real pendulum, and its measured period matches the analytic prediction.
 **Independent Test**: Run the pendulum demo, release from a small angle,
 measure the oscillation period, compare to the physical-pendulum formula.
 
-- [ ] T017 [US2] Implement `examples/hinge.rs`: a static pin body (small
+- [X] T017 [US2] Implement `examples/hinge.rs`: a static pin body (small
       circle, per quickstart.md) and a dynamic rod (a tall, narrow polygon)
       joined via `RevoluteJoint::new` at the rod's local top end, released
       from a small angle (set initial `orientation`), rendered each frame
@@ -211,7 +211,7 @@ measure the oscillation period, compare to the physical-pendulum formula.
       (draw the rod as a rotated rectangle, draw the pin as a small
       circle, draw a line for the joint's two anchor points to visually
       confirm they stay together). *(depends on Phase 2, T007)*
-- [ ] T018 [P] [US2] In `tests/joints.rs`, write
+- [X] T018 [P] [US2] In `tests/joints.rs`, write
       `pendulum_period_matches_analytic_prediction`: build the same
       pin+rod scene as `examples/hinge.rs` (rod as a known polygon, so its
       mass/inertia are computable via `Shape::inertia`), release from a
@@ -223,7 +223,7 @@ measure the oscillation period, compare to the physical-pendulum formula.
       theorem: `I_pin = I_center + m·L²`), `T = 2π√(I_pin / (m·g·L))`
       where `L` is the pin-to-center-of-mass distance — per quickstart.md's
       note that the point-mass formula is the wrong comparison here.
-- [ ] T019 [US2] Manually run `cargo run --example hinge --release`,
+- [X] T019 [US2] Manually run `cargo run --example hinge --release`,
       watch the full run, and confirm (per SC-003): no visible jitter, no
       visible separation between the rod's anchor and the pin, and no
       visible growth in swing amplitude over time. Record the observation
@@ -246,18 +246,18 @@ light-body happy path.
 larger release angle and/or a heavier rod for an extended duration; confirm
 the anchor stays coincident and motion stays bounded.
 
-- [ ] T020 [P] [US3] In `tests/joints.rs`, write
+- [X] T020 [P] [US3] In `tests/joints.rs`, write
       `large_angle_pendulum_stays_bounded_and_coincident`: release the same
       rod-on-pin scene from a large angle (e.g. 80°) for an extended run
       (well beyond one period), asserting the anchor gap stays within
       `JOINT_SLOP`-scale tolerance throughout and that angular velocity
       never exceeds a generous bound derived from energy conservation
       (no runaway/divergence).
-- [ ] T021 [P] [US3] In `tests/joints.rs`, write
+- [X] T021 [P] [US3] In `tests/joints.rs`, write
       `heavier_rod_pendulum_stays_bounded_and_coincident`: same scene with
       a substantially heavier rod mass, same bounded-motion and
       anchor-coincidence assertions as T020.
-- [ ] T022 [US3] If T020/T021 reveal instability (divergence, anchor
+- [X] T022 [US3] If T020/T021 reveal instability (divergence, anchor
       separation beyond tolerance), retune `JOINT_SLOP`/
       `JOINT_CORRECTION_PERCENT` in `src/joint.rs` (or, if that's
       insufficient, `solver::VELOCITY_ITERATIONS`'s shared use — see
@@ -279,22 +279,22 @@ tested.
 **Purpose**: Bring the milestone to the same finished state M0–M4 and M5
 were left in.
 
-- [ ] T023 [P] Add a "Joints" subsection to `README.md` § How it works,
+- [X] T023 [P] Add a "Joints" subsection to `README.md` § How it works,
       writing out the revolute joint's derivation (the `Cdot`, `K`, and
       impulse formulas from research.md § 1, and the Baumgarte correction
       from research.md § 4) in the same notation/style as § Resolution's
       contact math, per Principle III ("the derivation lands in the same
       change that implements it"). Flip M6's checkbox to `[x]` in §
       Post-MVP milestones.
-- [ ] T024 [P] Update `CLAUDE.md`: add `cargo run --example hinge
+- [X] T024 [P] Update `CLAUDE.md`: add `cargo run --example hinge
       --release` to the Commands block, add `joint.rs` to the Architecture
       module list, and note the `World::step` loop now interleaves joints
       and contacts (matching the level of detail already given for
       `solver.rs`).
-- [ ] T025 Run the full `cargo test` suite and confirm `tests/stacking.rs`
+- [X] T025 Run the full `cargo test` suite and confirm `tests/stacking.rs`
       and `tests/friction.rs` pass unmodified (FR-008 / SC-004 — no
       joint-free scene may change behavior).
-- [ ] T026 Manually re-run `cargo run --example stack --release`,
+- [X] T026 Manually re-run `cargo run --example stack --release`,
       `cargo run --example pyramid --release`, `cargo run --example ramp
       --release`, and `cargo run --example bouncing --release` to confirm
       no visible regression from the `World::step`/`solver.rs` restructure

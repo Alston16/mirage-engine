@@ -7,10 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 MVP complete: the `mirage` crate exists and milestones M0–M4 have landed
 (math, bodies and integrator, collision, impulse resolution, friction and
 warm-started stacking), with all four demos watched with `--release`.
-`README.md` is the authoritative spec — it defines the architecture, the math
-each module must implement, and the milestone order (M0–M4) that development
-follows. Read `README.md` in full before writing code here; this file only
-adds what the README doesn't already say.
+M6 (revolute/hinge joint) has also landed, post-MVP: `examples/hinge.rs`
+swings a rod pinned at one end like a pendulum, matching the analytic
+period. `README.md` is the authoritative spec — it defines the architecture,
+the math each module must implement, and the milestone order (M0–M4, then
+the post-MVP joints phase) that development follows. Read `README.md` in
+full before writing code here; this file only adds what the README doesn't
+already say.
 
 ## What this project is
 
@@ -30,6 +33,7 @@ cargo run --example stack --release   # MVP acceptance demo: 10-box tower
 cargo run --example bouncing --release
 cargo run --example pyramid --release
 cargo run --example ramp --release    # shallow box holds, steep box slides
+cargo run --example hinge --release   # M6 acceptance demo: pendulum on a joint
 ```
 
 `--release` is not optional for the examples — debug builds of the solver
@@ -47,15 +51,20 @@ Single lib crate, no workspace split. Module responsibilities (see
 - `broadphase.rs` — O(n²) candidate-pair generation with AABB rejection (intentionally naive for the MVP — see README non-goals).
 - `collision/` — narrowphase, split by shape pair (`circle.rs`, `polygon.rs`) plus manifold construction (`manifold.rs`). `mod.rs` dispatches by shape-pair type.
 - `solver.rs` — sequential-impulse resolution (normal + friction + Baumgarte positional correction).
+- `joint.rs` — `RevoluteJoint` (M6): a coupled 2×2 point constraint, solved as a sequential-impulse equality constraint alongside contacts.
 
 Data flow per `World::step`: gravity is added to velocity → broadphase
 produces candidate pairs → narrowphase produces `Contact`/`Manifold` (point,
-normal, penetration; normal always points from `body_a` to `body_b`) → solver
-iterates impulses over manifolds (16 velocity iterations; each contact
-visit applies a friction impulse clamped to `±μ·j`, then the normal impulse,
-starting from the previous step's impulses for persistent contacts), then
-applies positional correction → integrator applies the resulting velocities
-to position and orientation (semi-implicit Euler).
+normal, penetration; normal always points from `body_a` to `body_b`) →
+`World::step` runs one shared velocity-iteration loop (16 iterations):
+each pass, `solver::iterate_once` visits every contact (a friction impulse
+clamped to `±μ·j`, then the normal impulse, starting from the previous
+step's impulses for persistent contacts), then `joint::iterate_once` visits
+every joint (a coupled 2D impulse pinning its anchor pair) — so a body that
+is both jointed and touching a contact converges under both each iteration.
+Positional correction follows for both (contacts via `solver::correct_positions`,
+joints via `joint::correct_positions`) → integrator applies the resulting
+velocities to position and orientation (semi-implicit Euler).
 
 The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 `mirage` itself only ever produces geometry and body state.
@@ -67,19 +76,25 @@ The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 
 ## Working on this repo
 
-- Follow milestone order (M0 → M4 in `README.md`) — later milestones assume
-  earlier ones are solid (e.g. don't build the solver before the integrator
-  and narrowphase are correct and tested).
+- Follow milestone order (M0 → M4 for the MVP, then M6 → M7 → M8 for
+  post-MVP joints in `README.md`) — later milestones assume earlier ones
+  are solid (e.g. don't build the solver before the integrator and
+  narrowphase are correct and tested; don't build the motor (M8) before the
+  revolute joint (M6) it's a variant of).
 - Match the math in code to the derivations written out in README § How it
-  works exactly (variable names like `e`, `μ`, `j`, `vr` included) — the
-  README's equations are the spec, not a paraphrase.
+  works exactly (variable names like `e`, `μ`, `j`, `vr`, and now `C`,
+  `Cdot`, `K`, `P` for joints included) — the README's equations are the
+  spec, not a paraphrase.
 - Keep the non-goals (README § Explicit non-goals) out of scope even if they
-  seem like natural extensions: no joints, no CCD, no sleeping, no concave
-  shapes, no spatial index, no serialization, no parallelism, no 3D.
+  seem like natural extensions: no CCD, no sleeping, no concave shapes, no
+  spatial index, no serialization, no parallelism, no 3D. Joints were
+  promoted out of the non-goals list into § Post-MVP milestones; M7
+  (distance/spring) and M8 (motor) are still not started — don't build them
+  as a side effect of other joint work.
 - When a milestone's "done when" criterion is observable via an example
-  (e.g. M4's 60-second stable stack), verify it by actually running that
-  example — this is a physics engine, correctness is behavioral, not just
-  compile-clean.
+  (e.g. M4's 60-second stable stack, M6's pendulum period), verify it by
+  actually running that example — this is a physics engine, correctness is
+  behavioral, not just compile-clean.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
