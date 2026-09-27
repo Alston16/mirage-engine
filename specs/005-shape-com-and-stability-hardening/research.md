@@ -93,3 +93,41 @@ keeps this test consistent with the rest of the suite.
   though the *outcome* (holds vs. collapses) is reproducible and, per the
   existing `tower_is_bit_identical_across_runs` test, deterministic given
   identical inputs and iteration order.
+
+## In-repo notes
+
+### T001 — Gate 0 baseline (2026-09-27)
+
+- `cargo test` on branch `005-shape-com-and-stability-hardening`, before any
+  M5 change: **97 passed, 0 failed** (83 unit + 7 `friction` + 7 `stacking`),
+  0 doc-tests.
+- `cargo run --example stack --release` builds and launches cleanly (release
+  profile, no panics). The window was not re-watched frame-by-frame for this
+  gate — M4's visual acceptance (60 s, no jitter/sinking) was already
+  confirmed and recorded in `README.md` § Status; T001's purpose is only to
+  confirm nothing regressed *before* M5 touches any code, not to redo M4's
+  acceptance pass. A full visual re-watch happens again in Polish (T013)
+  after the M5 changes land.
+- Baseline confirmed: proceeding to Phase 3 (US1) and Phase 4 (US2).
+
+### Phase 3 (US1) — implementation notes
+
+- `src/shape.rs`'s own `#[cfg(test)]`-only `unit_square()` helper (used since
+  before this feature) spans `(0,0)`–`(1,1)` — its centroid is `(0.5, 0.5)`,
+  not the origin. It was never actually a "pre-centered" fixture; it's only
+  ever been used for normal/AABB checks, never for `inertia()`. This was
+  discovered while implementing T002/T003 and is a real instance of exactly
+  the bug this feature closes (an off-center vertex list nobody had centered).
+- Consequence: one existing test, `polygon_aabb_axis_aligned_matches_extent`,
+  hardcoded AABB bounds that assumed `unit_square()`'s local origin stayed at
+  its corner. After the fix, the local origin is its centroid, so the correct
+  bounds at world position `(10,10)` are `(9.5,9.5)`–`(10.5,10.5)`, not
+  `(10,10)`–`(11,11)`. Updated deliberately (not a loosened assertion — a
+  corrected one, matching data-model.md's stated invariant change).
+- `polygon_normals_point_outward_for_ccw_winding` and
+  `polygon_aabb_grows_when_rotated` (the other two tests built on
+  `unit_square()`) needed no change: normals are translation-invariant, and
+  the rotated-vs-axis-aligned extent comparison holds regardless of where the
+  local origin sits.
+- `cargo test` after the fix: **100 passed, 0 failed** (86 unit — 83 + 3 new —
+  + 7 `friction` + 7 `stacking`), up from the 97 baseline.

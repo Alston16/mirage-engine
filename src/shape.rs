@@ -45,11 +45,17 @@ impl Shape {
     /// Builds a convex polygon from counter-clockwise-wound local-space
     /// vertices, deriving each edge's outward normal.
     ///
-    /// The vertices must be centered so that local `(0, 0)` — the point the
-    /// body rotates about — is the polygon's actual center of mass. This is
-    /// the caller's responsibility: no recentering happens here or in
-    /// `inertia`. See `inertia`'s doc comment for what breaks if it isn't.
+    /// Local `(0, 0)` — the point the body rotates about — must be the
+    /// polygon's center of mass for `inertia`'s integral (below) to be
+    /// correct. Rather than trust the caller to have already centered the
+    /// input, `polygon` computes the vertex list's true centroid (area-
+    /// weighted, the same `cᵢ = pᵢ × pᵢ₊₁` convention `inertia` uses) and
+    /// shifts every vertex by it before storing, so local `(0, 0)` is always
+    /// the center of mass, regardless of where the input's own origin was.
+    /// Already-centered input (centroid at the origin) sees a zero shift.
     pub fn polygon(vertices: Vec<Vec2>) -> Self {
+        let centroid = Self::centroid(&vertices);
+        let vertices: Vec<Vec2> = vertices.into_iter().map(|v| v - centroid).collect();
         let normals = (0..vertices.len())
             .map(|i| {
                 let a = vertices[i];
@@ -62,6 +68,29 @@ impl Shape {
             })
             .collect();
         Shape::Polygon { vertices, normals }
+    }
+
+    /// Area-weighted centroid (center of mass) of a simple convex, CCW-wound
+    /// polygon:
+    ///
+    /// ```text
+    /// cᵢ = pᵢ × pᵢ₊₁      (signed, per-edge; Σcᵢ = 2·signed area)
+    /// C   = 1/(6·A) · Σ (pᵢ + pᵢ₊₁) · cᵢ,   A = ½·Σcᵢ
+    /// ```
+    ///
+    /// Uses the same `cᵢ` convention as `inertia`'s triangle-fan sum, so the
+    /// two integrals read side by side.
+    fn centroid(vertices: &[Vec2]) -> Vec2 {
+        let mut cross_sum = 0.0;
+        let mut weighted = Vec2::ZERO;
+        for i in 0..vertices.len() {
+            let p = vertices[i];
+            let q = vertices[(i + 1) % vertices.len()];
+            let c = p.cross(q);
+            cross_sum += c;
+            weighted = weighted + (p + q) * c;
+        }
+        weighted / (3.0 * cross_sum)
     }
 
     /// World-space vertices and outward-facing normals for a `Polygon`
@@ -85,19 +114,11 @@ impl Shape {
     /// `I = m / (6·Σcᵢ) · Σ cᵢ·(pᵢ·pᵢ + pᵢ·pᵢ₊₁ + pᵢ₊₁·pᵢ₊₁)` with
     /// `cᵢ = pᵢ × pᵢ₊₁`.
     ///
-    /// This assumes the polygon's vertices are centered on its center of
-    /// mass (COM), i.e. that the local origin *is* the COM — the formula
-    /// integrates about `(0, 0)` with no centroid computation or shift.
-    /// Nothing here checks that assumption. If it doesn't hold (e.g. an
-    /// off-center polygon built with a corner at the local origin instead
-    /// of its centroid), `I` is silently computed about the wrong point:
-    /// it won't panic, but the body's angular response to torque/impulses
-    /// will be physically wrong (over- or under-rotating, drifting under
-    /// spin that should be stable). If a future milestone needs polygons
-    /// built from arbitrary (non-centered) vertices, this is the spot that
-    /// would need a centroid computation feeding the parallel-axis theorem
-    /// before this integral, plus a recentering of the stored vertices (or
-    /// of `RigidBody::position`) so `position` still tracks the true COM.
+    /// This integrates about `(0, 0)` with no centroid computation of its
+    /// own — but `Shape::polygon` guarantees local `(0, 0)` is already the
+    /// polygon's true center of mass (it recenters whatever vertices it's
+    /// given), so this is always correct for any `Polygon` shape, regardless
+    /// of how the caller's original vertices were positioned.
     pub fn inertia(&self, mass: f32) -> f32 {
         match self {
             Shape::Circle { radius } => 0.5 * mass * radius * radius,
@@ -193,10 +214,15 @@ mod tests {
 
     #[test]
     fn polygon_aabb_axis_aligned_matches_extent() {
+        // M5: `unit_square()` spans (0,0)-(1,1), so its centroid — now the
+        // shape's local origin (issue #7's fix) — is (0.5, 0.5), not the
+        // corner. A 1x1 box placed at (10, 10) therefore spans
+        // (9.5, 9.5)-(10.5, 10.5), not (10, 10)-(11, 11) as it would if the
+        // local origin were still the corner.
         let shape = Shape::polygon(unit_square());
         let aabb = shape.aabb(Vec2::new(10.0, 10.0), Rot2::IDENTITY);
-        assert_eq!(aabb.min, Vec2::new(10.0, 10.0));
-        assert_eq!(aabb.max, Vec2::new(11.0, 11.0));
+        assert_eq!(aabb.min, Vec2::new(9.5, 9.5));
+        assert_eq!(aabb.max, Vec2::new(10.5, 10.5));
     }
 
     #[test]
@@ -239,5 +265,78 @@ mod tests {
         let mass = 5.0;
         let expected = mass * (2.0 * 2.0 + 4.0 * 4.0) / 12.0;
         assert!((rect.inertia(mass) - expected).abs() < 1e-4);
+    }
+
+    // --- M5: centroid correction (issue #7) ---------------------------------
+
+    /// US1-1/2/3/4, FR-001, FR-002, FR-004, SC-001: `unit_square()` spans
+    /// `(0,0)`–`(1,1)` — its centroid is `(0.5, 0.5)`, not the origin, so it's
+    /// exactly the off-center input this fix targets. The equivalent
+    /// pre-centered polygon is the same square shifted so its centroid sits
+    /// at the origin — a half-extent-0.5 box. After recentering, the two
+    /// must be indistinguishable: same stored vertices/normals, same mass
+    /// properties, and (since `RigidBody` derives `PartialEq` too) any body
+    /// built from either at the same position is identical.
+    #[test]
+    fn off_center_polygon_recenters_to_match_pre_centered() {
+        let off_center = Shape::polygon(unit_square());
+        let pre_centered = Shape::polygon(vec![
+            Vec2::new(-0.5, -0.5),
+            Vec2::new(0.5, -0.5),
+            Vec2::new(0.5, 0.5),
+            Vec2::new(-0.5, 0.5),
+        ]);
+        assert_eq!(off_center, pre_centered, "off-center input must recenter to match the equivalent pre-centered polygon");
+        assert!((off_center.inertia(3.0) - pre_centered.inertia(3.0)).abs() < EPS);
+    }
+
+    /// FR-003, SC-002: shapes that were already centered (every fixture used
+    /// elsewhere in this file, in the engine's other modules, its examples,
+    /// and its tests) must see a zero shift — the recentering is a no-op for
+    /// input that was already correct.
+    #[test]
+    fn already_centered_polygon_has_no_shift() {
+        let square_verts = vec![
+            Vec2::new(-1.0, -1.0),
+            Vec2::new(1.0, -1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, 1.0),
+        ];
+        let rect_verts = vec![
+            Vec2::new(-1.0, -2.0),
+            Vec2::new(1.0, -2.0),
+            Vec2::new(1.0, 2.0),
+            Vec2::new(-1.0, 2.0),
+        ];
+        for verts in [square_verts, rect_verts] {
+            if let Shape::Polygon { vertices, .. } = Shape::polygon(verts.clone()) {
+                for (stored, input) in vertices.iter().zip(verts.iter()) {
+                    approx_eq_vec(*stored, *input);
+                }
+            } else {
+                panic!("expected Polygon");
+            }
+        }
+    }
+
+    /// FR-005, FR-006, SC-003: a valid but very small-area convex polygon
+    /// must not make the centroid computation or `inertia` divide out to
+    /// `NaN`/`Inf` — the existing formula's `Σcᵢ` denominator shrinks with
+    /// the polygon's area, but stays proportional to it, not to zero.
+    #[test]
+    fn near_degenerate_polygon_centroid_and_inertia_stay_finite() {
+        let tiny = Shape::polygon(vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1e-3, 0.0),
+            Vec2::new(0.0, 1e-3),
+        ]);
+        if let Shape::Polygon { vertices, .. } = &tiny {
+            for v in vertices {
+                assert!(v.x.is_finite() && v.y.is_finite(), "centroid shift produced a non-finite vertex: {v:?}");
+            }
+        } else {
+            panic!("expected Polygon");
+        }
+        assert!(tiny.inertia(1.0).is_finite(), "inertia() must stay finite for a small-but-valid polygon");
     }
 }

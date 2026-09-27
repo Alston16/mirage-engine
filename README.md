@@ -188,6 +188,18 @@ Known trade-off: sequential impulses converge iteratively rather than
 solving the contact LCP exactly, so tall stacks stay slightly soft under
 load. That's expected behavior for this class of solver, not a bug to chase.
 
+Known trade-off: a frictionless (`μ = 0`) stack is only *neutrally* stable —
+with nothing to damp the residual per-step torque a two-point manifold
+leaves behind (the trade-off above), a perfectly aligned tower of more than
+about three boxes collapses on its own, no perturbation needed, into
+non-physical speeds. This is expected for `μ = 0` specifically: friction is
+what gives a stack the sideways resistance to stay put despite that residual
+error, and the accumulated tangent impulse is clamped to `±μ·j = 0` when
+`μ = 0`, so nothing resists the drift. Once a stack is airborne at that
+speed, it can also tunnel through the floor before the next contact is
+detected — an expected symptom of having no continuous collision detection
+(an explicit non-goal), not a new defect.
+
 ## MVP milestones
 
 - [x] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/

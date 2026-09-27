@@ -275,6 +275,59 @@ fn tower_is_bit_identical_across_runs() {
     }
 }
 
+// --- M5: frictionless-stacking limitation (issue #11), documented and -----
+// --- pinned; see README's `μ = 0` known trade-off. No solver change. ------
+
+/// US2-1, FR-008: a 2-box frictionless stack holds — the documented
+/// boundary is above ~3 boxes, so 2 must stay well within it.
+#[test]
+fn frictionless_two_box_stack_holds_within_measured_drift() {
+    let mut world = World::new();
+    let ids = frictionless_tower(&mut world, 2);
+    // Issue #11 measured a max drift of 0.0099 box widths over 60 s; loosen
+    // slightly to avoid pinning floating-point noise while still catching a
+    // regression toward instability.
+    const FRICTIONLESS_HOLD_DRIFT_MAX: f32 = 0.02;
+
+    for step in 1..=3600 {
+        world.step(DT);
+        assert!(all_finite(&world, &ids), "non-finite state at step {step}");
+        let drift = max_drift(&world, &ids, 0.0);
+        assert!(
+            drift <= FRICTIONLESS_HOLD_DRIFT_MAX,
+            "t={:.2}: frictionless 2-box drift {drift:.4} > {FRICTIONLESS_HOLD_DRIFT_MAX}",
+            step as f32 * DT
+        );
+    }
+}
+
+/// US2-2, FR-008: a taller frictionless stack collapses — this is the
+/// expected, documented outcome (README's `μ = 0` known trade-off), pinned
+/// as a passing assertion rather than left untested. Collapse produces
+/// large but still-finite numbers (no CCD, so the stack can fly off and
+/// eventually tunnel through the floor once airborne) — never `NaN`/`Inf`.
+#[test]
+fn frictionless_five_box_stack_collapses_as_documented() {
+    let mut world = World::new();
+    let ids = frictionless_tower(&mut world, 5);
+    // Issue #11 measured drift exceeding 0.5 box widths by t = 14.1 s; run
+    // comfortably past that and require a much larger, unambiguous drift.
+    const COLLAPSE_DRIFT_MIN: f32 = 1.0;
+
+    let mut worst_drift = 0.0_f32;
+    for step in 1..=1200 {
+        world.step(DT);
+        assert!(all_finite(&world, &ids), "non-finite state at step {step} (collapse must stay finite, not NaN/Inf)");
+        worst_drift = worst_drift.max(max_drift(&world, &ids, 0.0));
+    }
+    println!("  SUMMARY frictionless5: max drift {worst_drift:.4} over 20s (documented collapse)");
+    assert!(
+        worst_drift > COLLAPSE_DRIFT_MIN,
+        "expected the documented frictionless collapse (drift > {COLLAPSE_DRIFT_MIN}), got max drift {worst_drift:.4} — \
+         if this starts failing, the μ = 0 boundary has moved and README's known trade-off needs re-measuring"
+    );
+}
+
 /// Constitution II: rendering framerate must not matter. The demos call
 /// `step(get_frame_time())` with whatever the display gives them; a tower
 /// driven by a mix of 144, 75 and 30 Hz frames for 60 s must end as settled
