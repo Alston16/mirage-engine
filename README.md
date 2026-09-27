@@ -20,8 +20,10 @@ warm-started stacking. A 10-box tower stands for 60 s
 (`cargo run --example pyramid --release`), and a box holds on a shallow ramp
 while one on a steep ramp slides (`cargo run --example ramp --release`); all
 four demos were watched with `--release`, and the same behaviors are covered
-by `cargo test`. The milestones below (§ MVP milestones) are the source of
-truth for progress.
+by `cargo test`. Post-MVP hardening (shape center-of-mass correction,
+frictionless-stacking boundary) has also landed. The milestones below
+(§ MVP milestones) are the source of truth for MVP progress; the next phase,
+joints and constraints, is tracked in § Post-MVP milestones.
 
 ## Design principles
 
@@ -225,9 +227,46 @@ detected — an expected symptom of having no continuous collision detection
 
 The MVP is complete at M4.
 
+## Post-MVP milestones
+
+Joints and constraints were an explicit MVP non-goal (below); with M0–M4
+complete and stable, they're the next phase. Each joint type is its own
+milestone, gated the same way M0–M4 were — a demo watched with `--release`,
+not just compile-clean — and lands in a new `src/joint.rs`, added to
+`World::step`'s existing velocity-iteration loop alongside contacts (a joint
+is solved as a sequential-impulse equality constraint the same way a contact
+is solved as an inequality one; no change to `solver.rs`'s contact path).
+
+- [ ] **M6 — Revolute (hinge) joint.** A 2-body point constraint pinning a
+      local anchor on body A to a local anchor on body B, Baumgarte-stabilized
+      the same way contact penetration is. `examples/hinge.rs`: a rod pinned
+      at one end swings like a pendulum under gravity.
+      *Done when:* the anchor stays coincident within positional-slop
+      tolerance for the full run, and the pendulum's period matches the
+      small-angle analytic prediction within a few percent.
+- [ ] **M7 — Distance / spring joint.** A 2-body constraint holding two
+      anchors at a target distance — rigid (equality constraint) or soft
+      (Hookean spring force with damping). `examples/spring.rs`: a box
+      suspended from a fixed point oscillates and settles.
+      *Done when:* a critically-damped spring settles to rest length without
+      visible overshoot, and an undamped spring conserves energy within the
+      solver's iterative tolerance over a fixed run length.
+- [ ] **M8 — Motor.** A revolute joint variant driving relative angular
+      velocity toward a target, torque-clamped the same way friction's
+      tangent impulse is clamped to `±μ·j`. `examples/motor.rs`: a pinned rod
+      is spun toward a target angular velocity against a resisting load.
+      *Done when:* the rod converges to and holds the target velocity within
+      tolerance while under max torque, and visibly stalls when the load
+      exceeds it.
+
+Full derivations for each (Jacobian, effective mass, bias term) land in
+§ How it works once implemented, in the same style as the solver's contact
+math above — not written speculatively ahead of the code.
+
 ## Explicit non-goals for the MVP
 
-- Joints and constraints (hinges, springs, motors)
+- ~~Joints and constraints (hinges, springs, motors)~~ — promoted to the next
+  phase, see § Post-MVP milestones
 - Continuous collision detection — fast-moving bodies **will** tunnel
   through thin geometry, and that's a known limitation, not a surprise
 - Sleeping / deactivation of resting bodies
