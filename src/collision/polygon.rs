@@ -8,6 +8,19 @@ use crate::{RigidBody, Vec2};
 /// against float-noise flicker (spec Edge Cases).
 const SLOP: f32 = 1e-4;
 
+/// Packs which geometric feature produced a manifold point: bit 24 = the
+/// reference face belongs to body `b` (`flip`), bits 16–23 = reference face,
+/// bits 8–15 = incident face, bits 0–7 = which endpoint of the incident edge
+/// (0 or 1). Stable while the same faces stay in contact, so the solver can
+/// match a contact to last step's (warm-starting); a clipped endpoint keeps
+/// its id.
+fn pack_feature(flip: bool, ref_face: usize, incident_face: usize, endpoint: usize) -> u32 {
+    (u32::from(flip) << 24)
+        | ((ref_face as u32 & 0xff) << 16)
+        | ((incident_face as u32 & 0xff) << 8)
+        | (endpoint as u32 & 0xff)
+}
+
 /// The axis (a face normal, and how far the other polygon penetrates past
 /// it) of least separation found while testing one polygon's faces against
 /// the other.
@@ -102,7 +115,7 @@ pub(crate) fn polygon_vs_polygon(a: &RigidBody, b: &RigidBody) -> Option<Vec<Con
 
     // Keep only clipped points still behind the reference face.
     let mut points = Vec::with_capacity(2);
-    for p in [inc_p1, inc_p2] {
+    for (endpoint, p) in [inc_p1, inc_p2].into_iter().enumerate() {
         let separation = ref_normal.dot(p - ref_v1);
         if separation <= SLOP {
             let penetration = -separation;
@@ -111,6 +124,7 @@ pub(crate) fn polygon_vs_polygon(a: &RigidBody, b: &RigidBody) -> Option<Vec<Con
                     point: p,
                     normal: if flip { -ref_normal } else { ref_normal },
                     penetration,
+                    feature: pack_feature(flip, ref_face, incident_face, endpoint),
                 });
             }
         }
@@ -211,5 +225,34 @@ mod tests {
         let points = polygon_vs_polygon(&a, &b).expect("expected a manifold");
 
         assert!(!points.is_empty());
+    }
+
+    #[test]
+    fn resting_box_features_are_stable_and_distinct() {
+        // A box resting on a wide floor slab, nudged 1e-3 sideways and down
+        // between two detections: the same two feature ids must come back,
+        // and the two points must not share one.
+        let floor = box_body(Vec2::new(0.0, -1.0), Rot2::IDENTITY);
+        let features = |x: f32, y: f32| {
+            let above = box_body(Vec2::new(x, y), Rot2::IDENTITY);
+            let points = polygon_vs_polygon(&floor, &above).expect("boxes overlap");
+            assert_eq!(points.len(), 2, "flat face-to-face contact has two points");
+            let mut f: Vec<u32> = points.iter().map(|c| c.feature).collect();
+            f.sort_unstable();
+            f
+        };
+        let first = features(0.0, 0.99);
+        let second = features(0.001, 0.988);
+        assert_eq!(first, second, "features changed under a 1e-3 motion");
+        assert_ne!(first[0], first[1], "two points share one feature id");
+    }
+
+    #[test]
+    fn pack_feature_fields_do_not_collide() {
+        let a = pack_feature(false, 1, 2, 0);
+        assert_ne!(a, pack_feature(true, 1, 2, 0), "flip");
+        assert_ne!(a, pack_feature(false, 3, 2, 0), "reference face");
+        assert_ne!(a, pack_feature(false, 1, 3, 0), "incident face");
+        assert_ne!(a, pack_feature(false, 1, 2, 1), "endpoint");
     }
 }

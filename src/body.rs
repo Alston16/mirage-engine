@@ -22,6 +22,10 @@ pub struct RigidBody {
     /// Bounciness `e` in `[0.0, 1.0]`: `0.0` absorbs all approach speed,
     /// `1.0` preserves it. Defaults to `0.0`.
     pub restitution: f32,
+    /// Coulomb friction coefficient `μ` (`>= 0.0`) of this body's surface.
+    /// A pair uses `√(μ_a · μ_b)`, so `0.0` on either body makes the contact
+    /// frictionless. Defaults to `0.5`.
+    pub friction: f32,
     pub shape: Shape,
 }
 
@@ -39,6 +43,7 @@ impl RigidBody {
             inv_inertia,
             is_static: false,
             restitution: 0.0,
+            friction: 0.5,
             shape,
         }
     }
@@ -55,6 +60,7 @@ impl RigidBody {
             inv_inertia: 0.0,
             is_static: true,
             restitution: 0.0,
+            friction: 0.5,
             shape,
         }
     }
@@ -65,6 +71,13 @@ impl RigidBody {
     /// `[0.0, 1.0]`.
     pub fn with_restitution(mut self, e: f32) -> Self {
         self.restitution = e.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Returns this body with its friction coefficient `μ` set, clamped to
+    /// `>= 0.0` (there is no upper bound: `μ > 1` is physical).
+    pub fn with_friction(mut self, mu: f32) -> Self {
+        self.friction = mu.max(0.0);
         self
     }
 }
@@ -91,6 +104,20 @@ mod tests {
     fn restitution_defaults_to_zero() {
         assert_eq!(RigidBody::new_dynamic(Vec2::ZERO, 1.0, Shape::circle(1.0)).restitution, 0.0);
         assert_eq!(RigidBody::new_static(Vec2::ZERO, Shape::circle(1.0)).restitution, 0.0);
+    }
+
+    #[test]
+    fn friction_defaults_to_half_for_dynamic_and_static() {
+        assert_eq!(RigidBody::new_dynamic(Vec2::ZERO, 1.0, Shape::circle(1.0)).friction, 0.5);
+        assert_eq!(RigidBody::new_static(Vec2::ZERO, Shape::circle(1.0)).friction, 0.5);
+    }
+
+    #[test]
+    fn with_friction_clamps_below_but_not_above() {
+        let base = || RigidBody::new_dynamic(Vec2::ZERO, 1.0, Shape::circle(1.0));
+        assert_eq!(base().with_friction(-1.0).friction, 0.0);
+        assert_eq!(base().with_friction(0.0).friction, 0.0);
+        assert_eq!(base().with_friction(2.0).friction, 2.0);
     }
 
     #[test]

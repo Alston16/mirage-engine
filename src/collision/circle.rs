@@ -27,6 +27,7 @@ pub(crate) fn circle_vs_circle(a: &RigidBody, b: &RigidBody) -> Option<Contact> 
         point: a.position + normal * *ra,
         normal,
         penetration,
+        feature: 0,
     })
 }
 
@@ -74,6 +75,7 @@ pub(crate) fn circle_vs_polygon(circle: &RigidBody, polygon: &RigidBody) -> Opti
             point: center - normal_dir * best_separation,
             normal: normal_dir,
             penetration,
+            feature: 0,
         });
     }
 
@@ -95,6 +97,7 @@ pub(crate) fn circle_vs_polygon(circle: &RigidBody, polygon: &RigidBody) -> Opti
             point: center - normal_dir * best_separation,
             normal: normal_dir,
             penetration,
+            feature: 0,
         })
     }
 }
@@ -110,6 +113,7 @@ fn vertex_contact(center: crate::Vec2, vertex: crate::Vec2, radius: f32) -> Opti
         point: vertex,
         normal: delta.normalize(),
         penetration,
+        feature: 0,
     })
 }
 
