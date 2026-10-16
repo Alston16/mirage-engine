@@ -7,6 +7,10 @@
 use crate::math::Mat2;
 use crate::{BodyId, RigidBody, Vec2};
 
+pub mod distance;
+
+pub use distance::{DistanceJoint, DistanceJointId, Spring};
+
 /// A 2-body point constraint pinning `anchor_a` (local to `body_a`) to
 /// `anchor_b` (local to `body_b`). Bodies remain free to rotate relative to
 /// each other; only their anchor points are held coincident.

@@ -1,7 +1,7 @@
 //! World — body storage, gravity, and the fixed-timestep integrator.
 
 use crate::collision::{self, manifold::Manifold};
-use crate::joint::{self, JointId, RevoluteJoint};
+use crate::joint::{self, DistanceJoint, DistanceJointId, JointId, RevoluteJoint};
 use crate::solver::{self, ImpulseCache};
 use crate::{BodyId, RigidBody, Rot2, Vec2};
 
@@ -13,6 +13,7 @@ pub(crate) const FIXED_DT: f32 = 1.0 / 60.0;
 pub struct World {
     bodies: Vec<RigidBody>,
     joints: Vec<RevoluteJoint>,
+    distance_joints: Vec<DistanceJoint>,
     gravity: Vec2,
     accumulator: f32,
     /// Contacts found during the most recently completed fixed substep.
@@ -28,6 +29,7 @@ impl World {
         World {
             bodies: Vec::new(),
             joints: Vec::new(),
+            distance_joints: Vec::new(),
             gravity: Vec2::new(0.0, -9.81),
             accumulator: 0.0,
             contacts: Vec::new(),
@@ -67,6 +69,42 @@ impl World {
         &self.joints[id.0 as usize]
     }
 
+    /// Adds a distance joint to the world, returning a handle to it. A
+    /// joint with `length: None` gets the anchors' current world-space
+    /// separation as its rest length.
+    ///
+    /// Panics under the same conditions as `add_joint`, or if `length`,
+    /// `spring.stiffness` or `spring.damping` is negative or non-finite.
+    pub fn add_distance_joint(&mut self, mut joint: DistanceJoint) -> DistanceJointId {
+        assert!(joint.body_a != joint.body_b, "a joint cannot connect a body to itself");
+        assert!((joint.body_a.0 as usize) < self.bodies.len(), "joint.body_a is not in this world");
+        assert!((joint.body_b.0 as usize) < self.bodies.len(), "joint.body_b is not in this world");
+        let valid = |x: f32| x.is_finite() && x >= 0.0;
+        if let Some(length) = joint.length {
+            assert!(valid(length), "joint.length must be finite and >= 0, got {length}");
+        }
+        if let Some(spring) = joint.spring {
+            assert!(valid(spring.stiffness), "spring.stiffness must be finite and >= 0, got {}", spring.stiffness);
+            assert!(valid(spring.damping), "spring.damping must be finite and >= 0, got {}", spring.damping);
+        }
+
+        if joint.length.is_none() {
+            let (a, b) = (self.body(joint.body_a), self.body(joint.body_b));
+            let p_a = a.position + a.orientation.rotate(joint.anchor_a);
+            let p_b = b.position + b.orientation.rotate(joint.anchor_b);
+            joint.length = Some((p_b - p_a).length());
+        }
+
+        let id = DistanceJointId(self.distance_joints.len() as u32);
+        self.distance_joints.push(joint);
+        id
+    }
+
+    /// Looks up a distance joint by id. Its `length` is always `Some(L0)`.
+    pub fn distance_joint(&self, id: DistanceJointId) -> &DistanceJoint {
+        &self.distance_joints[id.0 as usize]
+    }
+
     /// The contacts found during the most recently completed fixed
     /// substep, as they were when detected — before that substep's
     /// impulses and position correction were applied. Empty before the
@@ -82,19 +120,24 @@ impl World {
     /// depends on how `dt_real` was chopped up across calls. Each fixed
     /// step runs, in order:
     ///
+    /// 0. spring forces from start-of-step state, before gravity's kick so
+    ///    a spring's damper never reads `g·dt` as separation speed (see
+    ///    `joint::distance`);
     /// 1. `v += g * dt` for every dynamic body (`F = 0`);
     /// 2. broadphase + narrowphase to find contacts;
     /// 3. the impulse solver: velocity iterations — at every contact a
     ///    tangent (friction) impulse clamped to `±μ·j`, then the normal
-    ///    impulse, then every joint's coupled point-constraint impulse
-    ///    (see `solver` and `joint`) — so a body that is both jointed and
-    ///    touching a contact converges under both each iteration, not as
+    ///    impulse, then every joint's coupled point-constraint impulse,
+    ///    then every rigid distance joint's impulse along its anchor line
+    ///    (see `solver`, `joint` and `joint::distance`) — so a body that is
+    ///    both jointed and touching a contact converges under both each
+    ///    iteration, not as
     ///    two independently-converged passes. Contacts that persist from
     ///    the previous substep start from the impulses they ended it with
     ///    (warm-starting; joints do not warm-start — see
     ///    specs/006-revolute-hinge-joint/research.md § 5). Velocity
-    ///    iterations are followed by positional correction for both
-    ///    contacts and joints;
+    ///    iterations are followed by positional correction for contacts,
+    ///    revolute joints and rigid distance joints, in that order;
     /// 4. `x += v * dt` and `θ += ω * dt` — semi-implicit Euler, so
     ///    position uses the final post-impulse velocity.
     ///
@@ -105,6 +148,12 @@ impl World {
         self.accumulator += dt_real;
 
         while self.accumulator >= FIXED_DT {
+            // Built before gravity so springs read start-of-step state;
+            // positions don't change until integration, so the same states
+            // serve the rigid-distance solve below.
+            let distance = joint::distance::build_distance_joints(&self.bodies, &self.distance_joints);
+            joint::distance::apply_spring_forces(&mut self.bodies, &distance, FIXED_DT);
+
             for body in &mut self.bodies {
                 if body.is_static {
                     continue;
@@ -121,10 +170,12 @@ impl World {
             for _ in 0..solver::VELOCITY_ITERATIONS {
                 solver::iterate_once(&mut self.bodies, &mut contacts);
                 joint::iterate_once(&mut self.bodies, &mut joints);
+                joint::distance::iterate_once(&mut self.bodies, &distance);
             }
 
             solver::correct_positions(&mut self.bodies, &contacts);
             joint::correct_positions(&mut self.bodies, &joints);
+            joint::distance::correct_positions(&mut self.bodies, &distance);
             solver::store_impulses(&mut self.impulse_cache, &contacts);
 
             for body in &mut self.bodies {
@@ -178,6 +229,81 @@ mod tests {
         let mut world = World::new();
         let a = world.add_body(RigidBody::new_dynamic(Vec2::ZERO, 1.0, Shape::circle(1.0)));
         world.add_joint(RevoluteJoint::new(a, a, Vec2::ZERO, Vec2::ZERO));
+    }
+
+    fn two_body_world() -> (World, BodyId, BodyId) {
+        let mut world = World::new();
+        let a = world.add_body(RigidBody::new_static(Vec2::ZERO, Shape::circle(1.0)));
+        let b = world.add_body(RigidBody::new_dynamic(Vec2::new(3.0, 4.0), 1.0, Shape::circle(1.0)));
+        (world, a, b)
+    }
+
+    #[test]
+    fn add_distance_joint_round_trips_and_keeps_an_explicit_length() {
+        let (mut world, a, b) = two_body_world();
+        let joint = DistanceJoint::new(a, b, Vec2::new(0.1, 0.0), Vec2::ZERO)
+            .with_length(2.5)
+            .with_spring(10.0, 1.0);
+
+        let id = world.add_distance_joint(joint.clone());
+
+        assert_eq!(world.distance_joint(id), &joint);
+    }
+
+    #[test]
+    fn add_distance_joint_resolves_missing_length_to_current_separation() {
+        let (mut world, a, b) = two_body_world();
+        let id = world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::ZERO));
+        assert!((world.distance_joint(id).length.unwrap() - 5.0).abs() < EPS);
+    }
+
+    #[test]
+    fn add_distance_joint_resolves_length_with_a_rotated_off_center_anchor() {
+        let mut world = World::new();
+        let a = world.add_body(RigidBody::new_static(Vec2::ZERO, Shape::circle(1.0)));
+        let mut body = RigidBody::new_dynamic(Vec2::new(0.0, -3.0), 1.0, Shape::circle(1.0));
+        body.orientation = Rot2::new(std::f32::consts::FRAC_PI_2);
+        let b = world.add_body(body);
+
+        // Local (1, 0) rotated 90° CCW is world (0, 1): anchor at (0, -2).
+        let id = world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::new(1.0, 0.0)));
+
+        assert!((world.distance_joint(id).length.unwrap() - 2.0).abs() < EPS);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot connect a body to itself")]
+    fn add_distance_joint_panics_on_self_connection() {
+        let (mut world, _, b) = two_body_world();
+        world.add_distance_joint(DistanceJoint::new(b, b, Vec2::ZERO, Vec2::ZERO));
+    }
+
+    #[test]
+    #[should_panic(expected = "joint.length")]
+    fn add_distance_joint_panics_on_negative_length() {
+        let (mut world, a, b) = two_body_world();
+        world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::ZERO).with_length(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "joint.length")]
+    fn add_distance_joint_panics_on_nan_length() {
+        let (mut world, a, b) = two_body_world();
+        world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::ZERO).with_length(f32::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "spring.stiffness")]
+    fn add_distance_joint_panics_on_negative_stiffness() {
+        let (mut world, a, b) = two_body_world();
+        world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::ZERO).with_spring(-1.0, 0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "spring.damping")]
+    fn add_distance_joint_panics_on_negative_damping() {
+        let (mut world, a, b) = two_body_world();
+        world.add_distance_joint(DistanceJoint::new(a, b, Vec2::ZERO, Vec2::ZERO).with_spring(1.0, -1.0));
     }
 
     #[test]
