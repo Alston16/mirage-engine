@@ -9,7 +9,10 @@ MVP complete: the `mirage` crate exists and milestones M0–M4 have landed
 warm-started stacking), with all four demos watched with `--release`.
 M6 (revolute/hinge joint) has also landed, post-MVP: `examples/hinge.rs`
 swings a rod pinned at one end like a pendulum, matching the analytic
-period. `README.md` is the authoritative spec — it defines the architecture,
+period. M7 (distance / spring joint) has landed too: `examples/spring.rs`
+hangs boxes on under-damped, critical and undamped springs, which ring
+down, settle without overshoot, and oscillate indefinitely, respectively.
+`README.md` is the authoritative spec — it defines the architecture,
 the math each module must implement, and the milestone order (M0–M4, then
 the post-MVP joints phase) that development follows. Read `README.md` in
 full before writing code here; this file only adds what the README doesn't
@@ -34,6 +37,7 @@ cargo run --example bouncing --release
 cargo run --example pyramid --release
 cargo run --example ramp --release    # shallow box holds, steep box slides
 cargo run --example hinge --release   # M6 acceptance demo: pendulum on a joint
+cargo run --example spring --release  # M7 acceptance demo: three damping regimes
 ```
 
 `--release` is not optional for the examples — debug builds of the solver
@@ -52,18 +56,23 @@ Single lib crate, no workspace split. Module responsibilities (see
 - `collision/` — narrowphase, split by shape pair (`circle.rs`, `polygon.rs`) plus manifold construction (`manifold.rs`). `mod.rs` dispatches by shape-pair type.
 - `solver.rs` — sequential-impulse resolution (normal + friction + Baumgarte positional correction).
 - `joint.rs` — `RevoluteJoint` (M6): a coupled 2×2 point constraint, solved as a sequential-impulse equality constraint alongside contacts.
+- `joint/distance.rs` — `DistanceJoint` (M7): rigid mode is a scalar equality constraint along the anchor line, iterated after revolute joints; soft mode is an explicit Hookean force, applied once per step before gravity.
 
-Data flow per `World::step`: gravity is added to velocity → broadphase
+Data flow per `World::step`: spring forces are applied from start-of-step
+state (before gravity, so a damper never reads the `g·dt` kick as
+separation speed) → gravity is added to velocity → broadphase
 produces candidate pairs → narrowphase produces `Contact`/`Manifold` (point,
 normal, penetration; normal always points from `body_a` to `body_b`) →
 `World::step` runs one shared velocity-iteration loop (16 iterations):
 each pass, `solver::iterate_once` visits every contact (a friction impulse
 clamped to `±μ·j`, then the normal impulse, starting from the previous
 step's impulses for persistent contacts), then `joint::iterate_once` visits
-every joint (a coupled 2D impulse pinning its anchor pair) — so a body that
-is both jointed and touching a contact converges under both each iteration.
-Positional correction follows for both (contacts via `solver::correct_positions`,
-joints via `joint::correct_positions`) → integrator applies the resulting
+every joint (a coupled 2D impulse pinning its anchor pair), then
+`joint::distance::iterate_once` visits every rigid distance joint — so a
+body that is both jointed and touching a contact converges under both each
+iteration. Positional correction follows in the same order (contacts via
+`solver::correct_positions`, revolute joints via `joint::correct_positions`,
+rigid distance joints via `joint::distance::correct_positions`) → integrator applies the resulting
 velocities to position and orientation (semi-implicit Euler).
 
 The engine has no rendering code. `examples/*.rs` own all macroquad calls;
@@ -88,16 +97,18 @@ The engine has no rendering code. `examples/*.rs` own all macroquad calls;
 - Keep the non-goals (README § Explicit non-goals) out of scope even if they
   seem like natural extensions: no CCD, no sleeping, no concave shapes, no
   spatial index, no serialization, no parallelism, no 3D. Joints were
-  promoted out of the non-goals list into § Post-MVP milestones; M7
-  (distance/spring) and M8 (motor) are still not started — don't build them
-  as a side effect of other joint work.
+  promoted out of the non-goals list into § Post-MVP milestones; M6 and M7
+  have landed, M8 (motor) is not started — don't build it as a side effect
+  of other joint work, and keep rope / length-limit / breakable modes out
+  of `DistanceJoint` unless a milestone adds them.
 - When a milestone's "done when" criterion is observable via an example
-  (e.g. M4's 60-second stable stack, M6's pendulum period), verify it by
+  (e.g. M4's 60-second stable stack, M6's pendulum period, M7's spring
+  settle), verify it by
   actually running that example — this is a physics engine, correctness is
   behavioral, not just compile-clean.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/006-revolute-hinge-joint/plan.md`.
+at `specs/007-distance-spring-joint/plan.md`.
 <!-- SPECKIT END -->

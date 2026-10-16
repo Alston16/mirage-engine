@@ -24,7 +24,10 @@ by `cargo test`. Post-MVP hardening (shape center-of-mass correction,
 frictionless-stacking boundary) has also landed. M6, the first joint
 (revolute/hinge), has also landed: a rod pinned at one end swings like a
 real pendulum (`cargo run --example hinge --release`), its period matching
-the analytic prediction. The milestones below (§ MVP milestones) are the
+the analytic prediction. M7, the distance / spring joint, has also landed:
+boxes hanging on under-damped, critically damped and undamped springs ring
+down, settle without overshoot, and oscillate indefinitely, respectively
+(`cargo run --example spring --release`). The milestones below (§ MVP milestones) are the
 source of truth for MVP progress; the joints-and-constraints phase in
 progress is tracked in § Post-MVP milestones.
 
@@ -58,19 +61,23 @@ mirage-engine/
 │   │   └── manifold.rs  # Contact, Manifold, face clipping
 │   ├── solver.rs        # sequential impulses: normal, restitution, friction,
 │   │                    #   warm-starting
-│   └── joint.rs         # RevoluteJoint: coupled 2×2 point constraint (M6)
+│   ├── joint.rs         # RevoluteJoint: coupled 2×2 point constraint (M6)
+│   └── joint/
+│       └── distance.rs  # DistanceJoint: rigid rod or Hookean spring (M7)
 ├── tests/               # behavioral scenes on the public API
 │   ├── common/mod.rs    #   scene builders, metrics, acceptance bounds
 │   ├── friction.rs      #   ramps: hold/slide, Coulomb acceleration, rolling disc
 │   ├── stacking.rs      #   10-box tower, pyramid, mixed shapes, determinism
-│   └── joints.rs        #   anchor coincidence, pendulum period, joint+contact
+│   ├── joints.rs        #   anchor coincidence, pendulum period, joint+contact
+│   └── distance_joints.rs # spring settle/energy/period, rigid rod, mixed
 └── examples/
     ├── common/mod.rs    # shared drawing helpers for stack and pyramid
     ├── bouncing.rs      # circles falling onto a static floor
     ├── ramp.rs          # shallow ramp holds, steep ramp slides
     ├── stack.rs         # 10-box tower — the MVP acceptance demo
     ├── pyramid.rs       # stress case
-    └── hinge.rs         # M6 acceptance demo: a rod pinned at one end swings
+    ├── hinge.rs         # M6 acceptance demo: a rod pinned at one end swings
+    └── spring.rs        # M7 acceptance demo: boxes hanging on three springs
 ```
 
 One lib crate keeps the dependency story clean: `macroquad` is a
@@ -274,6 +281,81 @@ inertia about the pin (`I_pin = I_center + m·L²`, parallel axis theorem),
 not the simpler point-mass pendulum formula — to well within 1% in
 `tests/joints.rs`.
 
+### Distance / spring joint
+
+A `DistanceJoint` (M7) constrains only the *distance* between a local
+anchor on body `a` and one on body `b`. It never constrains their
+direction or the bodies' relative rotation. It runs in one of two modes:
+**rigid** (a massless rod, holding the distance at `L0`) or **soft** (a
+Hookean spring with damping, pulling it toward `L0`). If no `L0` is given,
+`World::add_distance_joint` takes the anchors' separation at that moment.
+
+Both modes share the same geometry, built once per step with
+`r_a`/`r_b` exactly as for the revolute joint:
+
+```
+d    = p_b − p_a,   L = |d|,   n = d / L
+C    = L − L0
+Cdot = n · ((v_b + ω_b × r_b) − (v_a + ω_a × r_a))
+K    = 1/m_a + 1/m_b + (r_a×n)²/I_a + (r_b×n)²/I_b
+```
+
+`Cdot` is the rate at which the anchors separate. `K` has exactly the
+form of a contact normal's effective mass: one degree of freedom, one
+direction, so there is no 2×2 coupling to respect. An impulse of
+magnitude `λ` is applied as `P = λ·n`: `−P` to body `a` and `+P` to body
+`b`, at their anchors.
+
+- **Rigid** — solved in the shared velocity-iteration loop, after the
+  revolute joints: `λ = −Cdot / K`. That is a contact's `Δj` with no
+  `≥ 0` clamp, because an equality constraint pulls as readily as it
+  pushes. Drift in `C` is then corrected the same way as the revolute
+  joint's gap, moving bodies along `n` by `percent · (|C| − slop) ·
+  sign(C) / (1/m_a + 1/m_b)`, split by inverse mass, with the same
+  `JOINT_SLOP` and `JOINT_CORRECTION_PERCENT`. `L`, `n` and `C` are
+  recomputed from current positions here, because contact and revolute
+  correction run first and may have moved the same bodies.
+- **Soft** — an explicit force `F = −(k·C + c·Cdot)` along `n`, applied
+  once per step as `λ = F·dt`. It is not iterated. `k` is the stiffness
+  (force per metre of stretch) and `c` the damping (force per m/s of
+  separation speed). `DistanceJoint::critical_damping(k, m)` returns
+  `c = 2√(k·m)`, the value that makes one body of mass `m`, moving along
+  the joint line, return to equilibrium as fast as possible without
+  overshooting.
+
+Two choices in the soft mode matter:
+
+- **Explicit force, not a softened constraint.** A Box2D-style soft
+  constraint is stable for any stiffness, but it is effectively implicit
+  Euler on the spring, so it bleeds energy even with `c = 0`. An explicit
+  force under semi-implicit Euler is symplectic: an undamped spring's
+  energy wobbles by `O(ω·dt)` but never drifts. Measured in
+  `tests/distance_joints.rs` over 60 s, the wobble is 2.7% of the
+  oscillation energy and the drift +0.003%. At `c = 2√(k·m)` the discrete
+  system stays non-oscillatory (measured overshoot: 0), and an
+  under-damped spring's period lands within 0.4% of `2π / (ω·√(1−ζ²))`.
+- **Applied before gravity.** Every spring impulse is computed from
+  start-of-step state, *before* `v += g·dt`. Evaluated after it, the
+  damper reads this step's `g·dt` kick as separation speed and pushes
+  back with a constant `c·g·dt`, so a hanging box settles `c·g·dt / k`
+  away from equilibrium (10 cm with the demo's critical `c`). This is the
+  same lesson as restitution's "subtract the `g·dt` kick" above. Forces in
+  one step must all see the same state.
+
+Known trade-off: an explicit spring is only stable while `ω·dt < 2`, with
+`ω = √(k/m_eff)`. At `dt = 1/60` that means springs slower than roughly
+19 Hz. For anything stiffer, use rigid mode.
+
+Known trade-off: a contact's restitution target subtracts the step's
+gravity kick from the approach velocity but not a spring's kick. A body
+pressed into a bouncy (`e > 0`) surface by a spring therefore bounces
+slightly more than it should. With the default `e = 0` this has no
+effect.
+
+`examples/spring.rs` hangs three boxes from fixed hooks, each released
+1 m below the length where its spring balances its weight (`L0 + m·g/k`):
+under-damped (`ζ = 0.1`), critically damped, and undamped.
+
 ## MVP milestones
 
 - [x] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/
@@ -316,7 +398,7 @@ is solved as an inequality one; no change to `solver.rs`'s contact path).
       *Done when:* the anchor stays coincident within positional-slop
       tolerance for the full run, and the pendulum's period matches the
       small-angle analytic prediction within a few percent.
-- [ ] **M7 — Distance / spring joint.** A 2-body constraint holding two
+- [x] **M7 — Distance / spring joint.** A 2-body constraint holding two
       anchors at a target distance — rigid (equality constraint) or soft
       (Hookean spring force with damping). `examples/spring.rs`: a box
       suspended from a fixed point oscillates and settles.
@@ -353,6 +435,7 @@ math above — not written speculatively ahead of the code.
 ```
 cargo run --example stack --release
 cargo run --example hinge --release
+cargo run --example spring --release
 cargo test
 ```
 
