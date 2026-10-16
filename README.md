@@ -21,9 +21,12 @@ warm-started stacking. A 10-box tower stands for 60 s
 while one on a steep ramp slides (`cargo run --example ramp --release`); all
 four demos were watched with `--release`, and the same behaviors are covered
 by `cargo test`. Post-MVP hardening (shape center-of-mass correction,
-frictionless-stacking boundary) has also landed. The milestones below
-(§ MVP milestones) are the source of truth for MVP progress; the next phase,
-joints and constraints, is tracked in § Post-MVP milestones.
+frictionless-stacking boundary) has also landed. M6, the first joint
+(revolute/hinge), has also landed: a rod pinned at one end swings like a
+real pendulum (`cargo run --example hinge --release`), its period matching
+the analytic prediction. The milestones below (§ MVP milestones) are the
+source of truth for MVP progress; the joints-and-constraints phase in
+progress is tracked in § Post-MVP milestones.
 
 ## Design principles
 
@@ -53,18 +56,21 @@ mirage-engine/
 │   │   ├── circle.rs    # circle–circle, circle–polygon
 │   │   ├── polygon.rs   # SAT axis test, reference/incident face
 │   │   └── manifold.rs  # Contact, Manifold, face clipping
-│   └── solver.rs        # sequential impulses: normal, restitution, friction,
-│                        #   warm-starting
+│   ├── solver.rs        # sequential impulses: normal, restitution, friction,
+│   │                    #   warm-starting
+│   └── joint.rs         # RevoluteJoint: coupled 2×2 point constraint (M6)
 ├── tests/               # behavioral scenes on the public API
 │   ├── common/mod.rs    #   scene builders, metrics, acceptance bounds
 │   ├── friction.rs      #   ramps: hold/slide, Coulomb acceleration, rolling disc
-│   └── stacking.rs      #   10-box tower, pyramid, mixed shapes, determinism
+│   ├── stacking.rs      #   10-box tower, pyramid, mixed shapes, determinism
+│   └── joints.rs        #   anchor coincidence, pendulum period, joint+contact
 └── examples/
     ├── common/mod.rs    # shared drawing helpers for stack and pyramid
     ├── bouncing.rs      # circles falling onto a static floor
     ├── ramp.rs          # shallow ramp holds, steep ramp slides
     ├── stack.rs         # 10-box tower — the MVP acceptance demo
-    └── pyramid.rs       # stress case
+    ├── pyramid.rs       # stress case
+    └── hinge.rs         # M6 acceptance demo: a rod pinned at one end swings
 ```
 
 One lib crate keeps the dependency story clean: `macroquad` is a
@@ -202,6 +208,72 @@ speed, it can also tunnel through the floor before the next contact is
 detected — an expected symptom of having no continuous collision detection
 (an explicit non-goal), not a new defect.
 
+### Joints
+
+A `RevoluteJoint` (M6) is a 2-body point constraint: it pins a local anchor
+on body `a` to a local anchor on body `b`, holding the two anchors
+coincident while leaving the bodies free to rotate relative to each other —
+a hinge, not a weld. It is solved as a sequential-impulse *equality*
+constraint (drive the anchors' relative velocity to zero) the same way a
+contact is solved as an *inequality* one (drive it to zero or better, never
+negative), in the same per-step velocity-iteration loop, so a body that is
+both jointed and touching a contact converges under both together.
+
+Unlike a contact, a joint constrains both world axes at once, so it isn't
+decomposed into an independent normal/tangent solve — that would ignore the
+coupling between them whenever a body's anchor isn't at its center of mass
+(exactly the pendulum case below). Instead it's solved as a single coupled
+2×2 linear system per iteration, the classic Box2D-Lite formulation:
+
+- Anchor points in world space: `p_a = pos_a + r_a`, `p_b = pos_b + r_b`,
+  where `r_a = R_a · anchor_a` and `r_b = R_b · anchor_b` are each body's
+  local anchor rotated into world space.
+- Constraint and its derivative: `C = p_b − p_a`,
+  `Cdot = (v_b + ω_b × r_b) − (v_a + ω_a × r_a)` — the joint-side analog of
+  `vr`.
+- Effective mass matrix:
+
+  ```
+  K = (1/m_a + 1/m_b) · I₂
+    + 1/I_a · [[r_a.y², −r_a.x·r_a.y], [−r_a.x·r_a.y,  r_a.x²]]
+    + 1/I_b · [[r_b.y², −r_b.x·r_b.y], [−r_b.x·r_b.y,  r_b.x²]]
+  ```
+
+- Impulse: `P = K⁻¹ · (−Cdot)`, applied as `−P` to body `a` and `+P` to
+  body `b` at their respective anchors — the same `apply_impulse` shape a
+  contact uses, just with a 2D impulse instead of a scalar one.
+
+Because `K`'s diagonal is at least `1/m_a + 1/m_b`, it's safely invertible
+whenever at least one connected body is dynamic; a joint between two static
+bodies (nothing to move) is dropped rather than solved, the same way a
+contact between two immovable bodies is dropped.
+
+Positional drift in the anchor gap is corrected the same way contact
+penetration is — moving bodies apart (here, together) directly rather than
+biasing velocity, so there's no restitution-adjacent effect to protect, just
+the same avoidance of injecting spurious energy: `shift = normalize(C) ·
+percent · max(|C| − slop, 0) / (1/m_a + 1/m_b)`, split by inverse mass. The
+joint uses its own tuned `JOINT_SLOP`/`JOINT_CORRECTION_PERCENT` constants
+rather than the contact solver's — a joint's gap isn't a compressive
+penetration between two solids, so it isn't assumed to need the same
+tuning, though the values that were tuned for 1 m stacked boxes turned out
+to need no change for the pendulum demo either (see
+`specs/006-revolute-hinge-joint/research.md` § 4).
+
+Joints do not warm-start (unlike contacts): a joint's `K` depends only on
+body geometry, not on which iteration converged last time, so cold-starting
+at zero impulse converges within the shared `VELOCITY_ITERATIONS` without a
+visible startup transient — measured against `examples/hinge.rs`'s
+pendulum, not assumed.
+
+`examples/hinge.rs` demoes a rod pinned at its top end to a fixed point,
+released off vertical, swinging under gravity. Released from a small angle,
+its measured oscillation period matches the physical-pendulum analytic
+prediction `T = 2π√(I_pin / (m·g·L))` — using the rod's actual moment of
+inertia about the pin (`I_pin = I_center + m·L²`, parallel axis theorem),
+not the simpler point-mass pendulum formula — to well within 1% in
+`tests/joints.rs`.
+
 ## MVP milestones
 
 - [x] **M0 — Scaffold & math.** `cargo new --lib`, `math.rs` with `Vec2`/
@@ -237,7 +309,7 @@ not just compile-clean — and lands in a new `src/joint.rs`, added to
 is solved as a sequential-impulse equality constraint the same way a contact
 is solved as an inequality one; no change to `solver.rs`'s contact path).
 
-- [ ] **M6 — Revolute (hinge) joint.** A 2-body point constraint pinning a
+- [x] **M6 — Revolute (hinge) joint.** A 2-body point constraint pinning a
       local anchor on body A to a local anchor on body B, Baumgarte-stabilized
       the same way contact penetration is. `examples/hinge.rs`: a rod pinned
       at one end swings like a pendulum under gravity.
@@ -280,6 +352,7 @@ math above — not written speculatively ahead of the code.
 
 ```
 cargo run --example stack --release
+cargo run --example hinge --release
 cargo test
 ```
 

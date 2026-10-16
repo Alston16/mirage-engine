@@ -1,6 +1,7 @@
 //! World — body storage, gravity, and the fixed-timestep integrator.
 
 use crate::collision::{self, manifold::Manifold};
+use crate::joint::{self, JointId, RevoluteJoint};
 use crate::solver::{self, ImpulseCache};
 use crate::{BodyId, RigidBody, Rot2, Vec2};
 
@@ -11,6 +12,7 @@ pub(crate) const FIXED_DT: f32 = 1.0 / 60.0;
 /// Owns all bodies in the simulation and advances them forward in time.
 pub struct World {
     bodies: Vec<RigidBody>,
+    joints: Vec<RevoluteJoint>,
     gravity: Vec2,
     accumulator: f32,
     /// Contacts found during the most recently completed fixed substep.
@@ -25,6 +27,7 @@ impl World {
     pub fn new() -> Self {
         World {
             bodies: Vec::new(),
+            joints: Vec::new(),
             gravity: Vec2::new(0.0, -9.81),
             accumulator: 0.0,
             contacts: Vec::new(),
@@ -42,6 +45,26 @@ impl World {
     /// Looks up a body's current state by id.
     pub fn body(&self, id: BodyId) -> &RigidBody {
         &self.bodies[id.0 as usize]
+    }
+
+    /// Adds a joint to the world, returning a handle to it.
+    ///
+    /// Panics if `joint.body_a` and `joint.body_b` are equal, or if either
+    /// does not refer to a body already in this world — the same
+    /// precondition class `World::body` already has for an unknown
+    /// `BodyId`.
+    pub fn add_joint(&mut self, joint: RevoluteJoint) -> JointId {
+        assert!(joint.body_a != joint.body_b, "a joint cannot connect a body to itself");
+        assert!((joint.body_a.0 as usize) < self.bodies.len(), "joint.body_a is not in this world");
+        assert!((joint.body_b.0 as usize) < self.bodies.len(), "joint.body_b is not in this world");
+        let id = JointId(self.joints.len() as u32);
+        self.joints.push(joint);
+        id
+    }
+
+    /// Looks up a joint's current configuration by id.
+    pub fn joint(&self, id: JointId) -> &RevoluteJoint {
+        &self.joints[id.0 as usize]
     }
 
     /// The contacts found during the most recently completed fixed
@@ -63,9 +86,15 @@ impl World {
     /// 2. broadphase + narrowphase to find contacts;
     /// 3. the impulse solver: velocity iterations — at every contact a
     ///    tangent (friction) impulse clamped to `±μ·j`, then the normal
-    ///    impulse — followed by positional correction (see `solver`).
-    ///    Contacts that persist from the previous substep start from the
-    ///    impulses they ended it with (warm-starting);
+    ///    impulse, then every joint's coupled point-constraint impulse
+    ///    (see `solver` and `joint`) — so a body that is both jointed and
+    ///    touching a contact converges under both each iteration, not as
+    ///    two independently-converged passes. Contacts that persist from
+    ///    the previous substep start from the impulses they ended it with
+    ///    (warm-starting; joints do not warm-start — see
+    ///    specs/006-revolute-hinge-joint/research.md § 5). Velocity
+    ///    iterations are followed by positional correction for both
+    ///    contacts and joints;
     /// 4. `x += v * dt` and `θ += ω * dt` — semi-implicit Euler, so
     ///    position uses the final post-impulse velocity.
     ///
@@ -84,13 +113,19 @@ impl World {
             }
 
             let manifolds = collision::detect_contacts(&self.bodies);
-            solver::resolve(
-                &mut self.bodies,
-                &manifolds,
-                &mut self.impulse_cache,
-                self.gravity,
-                FIXED_DT,
-            );
+            let mut contacts =
+                solver::build_contacts(&self.bodies, &manifolds, self.gravity, FIXED_DT);
+            let mut joints = joint::build_joints(&self.bodies, &self.joints);
+            solver::warm_start(&mut self.bodies, &mut contacts, &self.impulse_cache);
+
+            for _ in 0..solver::VELOCITY_ITERATIONS {
+                solver::iterate_once(&mut self.bodies, &mut contacts);
+                joint::iterate_once(&mut self.bodies, &mut joints);
+            }
+
+            solver::correct_positions(&mut self.bodies, &contacts);
+            joint::correct_positions(&mut self.bodies, &joints);
+            solver::store_impulses(&mut self.impulse_cache, &contacts);
 
             for body in &mut self.bodies {
                 if body.is_static {
@@ -119,6 +154,31 @@ mod tests {
     use crate::Shape;
 
     const EPS: f32 = 1e-4;
+
+    #[test]
+    fn add_joint_returns_a_usable_id_and_joint_returns_what_was_stored() {
+        let mut world = World::new();
+        let a = world.add_body(RigidBody::new_static(Vec2::ZERO, Shape::circle(1.0)));
+        let b = world.add_body(RigidBody::new_dynamic(Vec2::new(1.0, 0.0), 1.0, Shape::circle(1.0)));
+        let anchor_a = Vec2::new(0.1, 0.2);
+        let anchor_b = Vec2::new(-0.1, -0.2);
+
+        let id = world.add_joint(RevoluteJoint::new(a, b, anchor_a, anchor_b));
+
+        let stored = world.joint(id);
+        assert_eq!(stored.body_a, a);
+        assert_eq!(stored.body_b, b);
+        assert_eq!(stored.anchor_a, anchor_a);
+        assert_eq!(stored.anchor_b, anchor_b);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot connect a body to itself")]
+    fn add_joint_panics_when_body_a_equals_body_b() {
+        let mut world = World::new();
+        let a = world.add_body(RigidBody::new_dynamic(Vec2::ZERO, 1.0, Shape::circle(1.0)));
+        world.add_joint(RevoluteJoint::new(a, a, Vec2::ZERO, Vec2::ZERO));
+    }
 
     #[test]
     fn dynamic_body_falls_at_g_times_t() {

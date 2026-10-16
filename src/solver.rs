@@ -79,7 +79,7 @@ impl ImpulseCache {
 }
 
 /// Per-contact-point solver state, built once per step and discarded.
-struct ContactState {
+pub(crate) struct ContactState {
     a: usize,
     b: usize,
     /// Unit normal, `a → b`.
@@ -116,7 +116,7 @@ struct ContactState {
 
 /// Builds solver state for every contact point. Contacts between two
 /// bodies that can't move (`K == 0`) are dropped.
-fn build_contacts(
+pub(crate) fn build_contacts(
     bodies: &[RigidBody],
     manifolds: &[Manifold],
     gravity: Vec2,
@@ -213,23 +213,11 @@ fn relative_velocity(bodies: &[RigidBody], c: &ContactState) -> Vec2 {
     (v_b + Vec2::cross_sv(w_b, c.r_b)) - (v_a + Vec2::cross_sv(w_a, c.r_a))
 }
 
-/// Builds the contact state and runs the velocity iterations, returning the
-/// final per-point state (accumulated impulses included).
-fn solve(
-    bodies: &mut [RigidBody],
-    manifolds: &[Manifold],
-    cache: &mut ImpulseCache,
-    gravity: Vec2,
-    dt: f32,
-) -> Vec<ContactState> {
-    // `bounce` is fixed here, from the true approach velocity — before the
-    // seeding below alters any velocity.
-    let mut contacts = build_contacts(bodies, manifolds, gravity, dt);
-
-    // Warm start: a contact that persists from last step (same body pair and
-    // feature) begins from the impulses it ended with, applied to both bodies
-    // now, instead of from zero. A contact with no match starts at zero.
-    for c in &mut contacts {
+/// Warm start: a contact that persists from last step (same body pair and
+/// feature) begins from the impulses it ended with, applied to both bodies
+/// now, instead of from zero. A contact with no match starts at zero.
+pub(crate) fn warm_start(bodies: &mut [RigidBody], contacts: &mut [ContactState], cache: &ImpulseCache) {
+    for c in contacts {
         if let Some((j, jt)) = cache.find(c.a as u32, c.b as u32, c.feature) {
             c.j_acc = j;
             c.jt_acc = jt;
@@ -238,38 +226,43 @@ fn solve(
             apply_impulse(bodies, c, c.n * j + c.t * jt);
         }
     }
+}
 
-    for _ in 0..VELOCITY_ITERATIONS {
-        for c in &mut contacts {
-            // Friction first, so the non-penetration constraint below has
-            // the last word each visit.
-            //
-            // vt = vr · t ;  Δjt = −vt / K_t ;  the *accumulated* jt is
-            // clamped to ±μ·j, with j the contact's accumulated normal
-            // impulse, so friction capacity grows as load builds up.
-            let vt = relative_velocity(bodies, c).dot(c.t);
-            let djt = -vt / c.k_t;
-            let max_jt = c.mu * c.j_acc;
-            let jt_new = (c.jt_acc + djt).clamp(-max_jt, max_jt);
-            let jt = jt_new - c.jt_acc;
-            c.jt_acc = jt_new;
-            apply_impulse(bodies, c, c.t * jt);
+/// One velocity-iteration pass over every contact: friction impulse first
+/// (so the non-penetration constraint below has the last word each visit),
+/// then the normal impulse. Run `VELOCITY_ITERATIONS` times per step by the
+/// caller (`World::step`), interleaved with `joint::iterate_once` so a body
+/// that is both touching a contact and jointed converges under both
+/// constraints together.
+pub(crate) fn iterate_once(bodies: &mut [RigidBody], contacts: &mut [ContactState]) {
+    for c in contacts {
+        // vt = vr · t ;  Δjt = −vt / K_t ;  the *accumulated* jt is
+        // clamped to ±μ·j, with j the contact's accumulated normal
+        // impulse, so friction capacity grows as load builds up.
+        let vt = relative_velocity(bodies, c).dot(c.t);
+        let djt = -vt / c.k_t;
+        let max_jt = c.mu * c.j_acc;
+        let jt_new = (c.jt_acc + djt).clamp(-max_jt, max_jt);
+        let jt = jt_new - c.jt_acc;
+        c.jt_acc = jt_new;
+        apply_impulse(bodies, c, c.t * jt);
 
-            let vn = relative_velocity(bodies, c).dot(c.n);
+        let vn = relative_velocity(bodies, c).dot(c.n);
 
-            // Iterated form of j = −(1 + e)(vr·n) / K: drive vr·n toward the
-            // target `bounce`, clamping the *accumulated* impulse to >= 0 so
-            // contacts push but never pull.
-            let dj = -(vn - c.bounce) / c.k;
-            let j_new = (c.j_acc + dj).max(0.0);
-            let j = j_new - c.j_acc;
-            c.j_acc = j_new;
-            apply_impulse(bodies, c, c.n * j);
-        }
+        // Iterated form of j = −(1 + e)(vr·n) / K: drive vr·n toward the
+        // target `bounce`, clamping the *accumulated* impulse to >= 0 so
+        // contacts push but never pull.
+        let dj = -(vn - c.bounce) / c.k;
+        let j_new = (c.j_acc + dj).max(0.0);
+        let j = j_new - c.j_acc;
+        c.j_acc = j_new;
+        apply_impulse(bodies, c, c.n * j);
     }
+}
 
-    // Remember this step's impulses for the next one. Replacing (not
-    // merging) drops every contact that isn't touching now.
+/// Remembers this step's impulses for the next one. Replacing (not
+/// merging) drops every contact that isn't touching now.
+pub(crate) fn store_impulses(cache: &mut ImpulseCache, contacts: &[ContactState]) {
     cache.entries = contacts
         .iter()
         .map(|c| CachedImpulse {
@@ -280,12 +273,37 @@ fn solve(
             jt: c.jt_acc,
         })
         .collect();
+}
+
+/// Builds the contact state and runs the velocity iterations, returning the
+/// final per-point state (accumulated impulses included). A thin composition
+/// of `build_contacts`/`warm_start`/`iterate_once`/`store_impulses`, kept for
+/// the tests below that don't need `World::step`'s shared joint+contact loop.
+#[cfg_attr(not(test), allow(dead_code))]
+fn solve(
+    bodies: &mut [RigidBody],
+    manifolds: &[Manifold],
+    cache: &mut ImpulseCache,
+    gravity: Vec2,
+    dt: f32,
+) -> Vec<ContactState> {
+    // `bounce` is fixed here, from the true approach velocity — before the
+    // seeding below alters any velocity.
+    let mut contacts = build_contacts(bodies, manifolds, gravity, dt);
+    warm_start(bodies, &mut contacts, cache);
+    for _ in 0..VELOCITY_ITERATIONS {
+        iterate_once(bodies, &mut contacts);
+    }
+    store_impulses(cache, &contacts);
     contacts
 }
 
 /// Resolves every contact in `manifolds`: velocity iterations (friction and
 /// normal), then positional correction. Position integration stays in
-/// `World::step`.
+/// `World::step`. A thin wrapper kept for callers with no joints to
+/// interleave — `World::step` itself calls the phases above directly so it
+/// can interleave `joint::iterate_once` between passes (README § Joints).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn resolve(
     bodies: &mut [RigidBody],
     manifolds: &[Manifold],
@@ -303,7 +321,7 @@ pub(crate) fn resolve(
 /// `percent · share · max(penetration − slop, 0) / (1/m_a + 1/m_b)`,
 /// weighted by each body's inverse mass. `share = 1 / points`, so a
 /// two-point manifold isn't corrected twice as hard as a one-point one.
-fn correct_positions(bodies: &mut [RigidBody], contacts: &[ContactState]) {
+pub(crate) fn correct_positions(bodies: &mut [RigidBody], contacts: &[ContactState]) {
     for c in contacts {
         let (inv_a, inv_b) = (bodies[c.a].inv_mass, bodies[c.b].inv_mass);
         let inv_sum = inv_a + inv_b;

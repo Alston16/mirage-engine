@@ -181,6 +181,48 @@ impl Mul for Rot2 {
     }
 }
 
+/// A 2×2 matrix, row-major: `[[m11, m12], [m21, m22]]`. Solver plumbing for
+/// the revolute joint's coupled point-constraint solve (README § Joints) —
+/// unlike `Vec2`/`Rot2`, not part of the engine's public math API.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Mat2 {
+    pub m11: f32,
+    pub m12: f32,
+    pub m21: f32,
+    pub m22: f32,
+}
+
+impl Mat2 {
+    pub(crate) fn new(m11: f32, m12: f32, m21: f32, m22: f32) -> Self {
+        Mat2 { m11, m12, m21, m22 }
+    }
+
+    /// The inverse matrix, via `1/det * adjugate`. Only ever called where
+    /// `det != 0` is guaranteed by at least one connected body having
+    /// nonzero inverse mass (the same guard `solver.rs` applies before
+    /// building a contact whose scalar `k == 0.0`).
+    pub(crate) fn invert(self) -> Mat2 {
+        let det = self.m11 * self.m22 - self.m12 * self.m21;
+        let inv_det = 1.0 / det;
+        Mat2::new(
+            self.m22 * inv_det,
+            -self.m12 * inv_det,
+            -self.m21 * inv_det,
+            self.m11 * inv_det,
+        )
+    }
+}
+
+impl Mul<Vec2> for Mat2 {
+    type Output = Vec2;
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        Vec2::new(
+            self.m11 * rhs.x + self.m12 * rhs.y,
+            self.m21 * rhs.x + self.m22 * rhs.y,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +354,28 @@ mod tests {
         let r = Rot2::new(2.1);
         let v = Vec2::new(3.0, -4.0);
         approx_eq(r.rotate(v).length(), v.length());
+    }
+
+    #[test]
+    fn mat2_mul_vec_matches_hand_computation() {
+        let m = Mat2::new(1.0, 2.0, 3.0, 4.0);
+        let v = Vec2::new(5.0, 6.0);
+        // [1 2] [5]   [1*5 + 2*6]   [17]
+        // [3 4] [6] = [3*5 + 4*6] = [39]
+        approx_eq_vec(m * v, Vec2::new(17.0, 39.0));
+    }
+
+    #[test]
+    fn mat2_invert_undoes_the_matrix() {
+        let m = Mat2::new(2.0, 1.0, 1.0, 3.0);
+        let v = Vec2::new(-1.5, 4.0);
+        approx_eq_vec(m.invert() * (m * v), v);
+    }
+
+    #[test]
+    fn mat2_identity_invert_is_identity() {
+        let identity = Mat2::new(1.0, 0.0, 0.0, 1.0);
+        let v = Vec2::new(2.0, -3.0);
+        approx_eq_vec(identity.invert() * v, v);
     }
 }
